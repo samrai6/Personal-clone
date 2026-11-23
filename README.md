@@ -1,40 +1,23 @@
 # Personal Clone Telegram Bot
 
-Kannada/English Telegram assistant with PM AI chat, movie information, movie-search deep links, group title spelling checks, and MongoDB daily quotas.
+A lightweight Kannada/English Telegram movie lookup bot powered by TMDB. No Gemini or AI chat replies.
 
 ## Features
 
-- PM: Gemini-powered Kannada/English replies.
-- Movie title only: movie details plus a button opening the matching search in `@Samp_yu5bot`.
-- OTT: official platform/date when found; otherwise reports Not announced. Estimates must be labelled unconfirmed.
-- Groups: checks short title-like messages only and replies to the original message only when Google Search grounding verifies a different title with confidence >= 0.90. Ordinary group conversation is ignored.
-- Quota: 50 AI PM requests per user per India calendar day (IST), stored in MongoDB. Admin IDs in `ADMIN_IDS` bypass the quota. Group spelling checks are not counted.
+- PM: Search a Movie or Web Series by title and show TMDB details.
+- IMDb Search button for every matched title.
+- Search in @Samp_yu5bot button for movie-file lookup.
+- Groups: checks short title-like messages against TMDB and replies with a spelling correction when a likely match is found.
+- No AI replies and no AI daily quota.
 
 ## Setup
 
-1. Create a Telegram bot with `@BotFather` and copy its token.
-2. Create a MongoDB Atlas cluster and copy its connection string.
-3. Create a Gemini API key at https://aistudio.google.com/apikey.
-4. Add these required environment variables to your hosting environment (or local `.env`): `BOT_TOKEN`, `MONGODB_URI`, and `GEMINI_API_KEY`. `ADMIN_IDS` is optional.
-5. Install and run:
+1. Create a Telegram bot with @BotFather.
+2. Create a TMDB API key at https://www.themoviedb.org/settings/api.
+3. Set these environment variables in Render (Background Worker):
+   - BOT_TOKEN
+   - TMDB_API_KEY
+4. Build command: `pip install -r requirements.txt`
+5. Start command: `python bot.py`
 
-```bash
-pip install -r requirements.txt
-python bot.py
-```
-
-## Render
-
-Create a **Background Worker** connected to this repository.
-- Build command: `pip install -r requirements.txt`
-- Start command: `python bot.py`
-- Add `BOT_TOKEN`, `MONGODB_URI`, and `GEMINI_API_KEY`. Optionally add `ADMIN_IDS` for admin quota bypass.
-
-For Koyeb, use the same build/start commands and the same environment variables.
-
-## Notes
-
-- Gemini Free Tier has model-specific request/token limits and may change. The bot's 50/user/day quota is separate from Google's limits; high concurrent traffic can still hit provider rate limits.
-- Google Search grounding availability and quota depend on the Gemini model, region, and Google account/project. Current movie/OTT facts cannot be guaranteed if grounding is unavailable.
-- The movie link uses the `getfile-` start payload supported by the configured movie bot. The username and deep-link convention must remain valid.
-- Never commit real API keys, bot tokens, or the `.env` file.
+Keep API keys out of this public GitHub repository. The bot reads TMDB_API_KEY from the environment.
