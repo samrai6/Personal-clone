@@ -43,14 +43,14 @@ def schedule_auto_delete(message, bot):
     asyncio.create_task(delete_later(bot, message.chat_id, message.message_id, delay))
 
 
-async def reply_text_auto(message, **kwargs):
-    sent = await reply_text_auto(message, **kwargs)
+async def reply_text_auto(message, *args, **kwargs):
+    sent = await message.reply_text(*args, **kwargs)
     schedule_auto_delete(sent, message.get_bot())
     return sent
 
 
-async def reply_photo_auto(message, **kwargs):
-    sent = await reply_photo_auto(message, **kwargs)
+async def reply_photo_auto(message, *args, **kwargs):
+    sent = await message.reply_photo(*args, **kwargs)
     schedule_auto_delete(sent, message.get_bot())
     return sent
 
@@ -249,7 +249,8 @@ async def show_movie(message, query, group_check=False):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.effective_message.reply_text(
+    await reply_text_auto(
+        update.effective_message,
         "ನಮಸ್ಕಾರ! Movie ಅಥವಾ Web Series ಹೆಸರು ಕಳುಹಿಸಿ. TMDB details ಕೊಡುತ್ತೇನೆ."
     )
 
@@ -284,7 +285,35 @@ async def group_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log.exception("Group TMDB title check failed")
 
 
+async def health_check(reader, writer):
+    try:
+        await reader.readuntil(b"\\r\\n\\r\\n")
+        body = b"Personal-clone Telegram bot is running"
+        writer.write(
+            b"HTTP/1.1 200 OK\\r\\n"
+            b"Content-Type: text/plain; charset=utf-8\\r\\n"
+            + f"Content-Length: {len(body)}\\r\\n".encode()
+            + b"Connection: close\\r\\n\\r\\n"
+            + body
+        )
+        await writer.drain()
+    except Exception:
+        pass
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+
+async def start_health_server(app):
+    port = int(os.getenv("PORT", "10000"))
+    server = await asyncio.start_server(health_check, "0.0.0.0", port)
+    app.bot_data["health_server"] = server
+    app.bot_data["health_server_task"] = asyncio.create_task(server.serve_forever())
+    log.info("Health server listening on 0.0.0.0:%s", port)
+
+
 async def startup_notify(app):
+    await start_health_server(app)
     try:
         sent = await app.bot.send_message(chat_id=OWNER_ID, text="I'm.alive sir 🤓")
         schedule_auto_delete(sent, app.bot)
