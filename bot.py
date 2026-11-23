@@ -168,7 +168,7 @@ async def show_title_suggestions(message, query):
     matches = await find_matching_titles(query)
     if not matches:
         await message.reply_text(
-            "ಹತ್ತಿರದ Movie / Web Series ಹೆಸರು ಸಿಗಲಿಲ್ಲ.\\n"
+            "ಹತ್ತಿರದ Movie / Web Series ಹೆಸರು ಸಿಗಲಿಲ್ಲ.\n"
             "No close matching titles found."
         )
         return
@@ -177,10 +177,10 @@ async def show_title_suggestions(message, query):
         for index, name in enumerate(matches, start=1)
     )
     await message.reply_text(
-        "<b>ನೀವು ಹುಡುಕುತ್ತಿರುವ Movie / Web Series ಇದರಲ್ಲಿ ಇರಬಹುದೇ?\\n"
-        "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\\n"
-        f"{suggestions}\\n\\n"
-        "<b>Did you mean one of these?</b>\\n"
+        "<b>ನೀವು ಹುಡುಕುತ್ತಿರುವ Movie / Web Series ಇದರಲ್ಲಿ ಇರಬಹುದೇ?\n"
+        "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\n"
+        f"{suggestions}\n\n"
+        "<b>Did you mean one of these?</b>\n"
         f"{suggestions}",
         parse_mode="HTML",
         reply_to_message_id=message.message_id,
@@ -225,7 +225,7 @@ async def show_movie(message, query, group_check=False):
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("⬇️ Download", url=movie_link(details["title"]))
     ]])
-    caption = "\n".join(lines)
+    caption = "<b>" + "\n".join(lines) + "</b>"
     poster = details.get("poster")
     if poster:
         await message.reply_photo(
