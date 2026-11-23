@@ -15,8 +15,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN", "")
-# Set TMDB_API_KEY in Render. Do not commit a real key to this public repository.
-TMDB_API_KEY = os.getenv("TMDB_API_KEY", "PASTE_TMDB_API_KEY_HERE")
+# TMDB Read Access Token from Ironman poster plugin.
+TMDB_BEARER_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI2ZGU3YTIyZGU1YjE5YTFjNmUyZGU5ZWEyMzE2ZmQxMCIsIm5iZiI6MTc0NTMyMjQ2Mi41MzMsInN1YiI6IjY4MDc4MWRlYzVjODAzNWZiMDhhNjExIiwic2NvcGVzIjpbImFwaV9yZWFkIl0sInZlcnNpb24iOjF9.rMMJ2-PBIv8Y7ybxPIEpIlzTEXzuwrm9ruKxAUCAsbw"
 MOVIE_BOT = "Samp_yu5bot"
 TMDB_BASE = "https://api.themoviedb.org/3"
 LANGUAGE = "en-US"
@@ -25,10 +25,10 @@ COUNTRY = "IN"
 
 async def tmdb_get(path, params=None):
     query = dict(params or {})
-    query["api_key"] = TMDB_API_KEY
     query.setdefault("language", LANGUAGE)
+    headers = {"Authorization": f"Bearer {TMDB_BEARER_TOKEN}", "accept": "application/json"}
     async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.get(TMDB_BASE + path, params=query)
+        response = await client.get(TMDB_BASE + path, params=query, headers=headers)
         response.raise_for_status()
         return response.json()
 
@@ -193,8 +193,6 @@ def main():
     missing = []
     if not TOKEN:
         missing.append("BOT_TOKEN")
-    if not TMDB_API_KEY or TMDB_API_KEY == "PASTE_TMDB_API_KEY_HERE":
-        missing.append("TMDB_API_KEY")
     if missing:
         raise SystemExit("Missing configuration: " + ", ".join(missing))
     app = ApplicationBuilder().token(TOKEN).build()
