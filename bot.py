@@ -415,9 +415,9 @@ async def source_channel_reply(update: Update, context: ContextTypes.DEFAULT_TYP
     message = update.channel_post
     if not message or message.chat_id != get_source_channel():
         return
-    if not message.reply_to_message or not message.from_user:
+    if not message.reply_to_message:
         return
-    if message.from_user.id != OWNER_ID:
+    if message.from_user and message.from_user.id != OWNER_ID:
         return
     user_id = get_relay_user(message.reply_to_message.message_id)
     if not user_id:
