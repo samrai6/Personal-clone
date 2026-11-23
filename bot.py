@@ -487,8 +487,19 @@ async def private_non_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    payload = context.args[0] if context.args else ""
+    if payload.startswith("getfile-"):
+        title = payload[len("getfile-"):].strip()
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        if title:
+            await reply_text_auto(message, title)
+        return
     await reply_text_auto(
-        update.effective_message,
+        message,
         "ನಮಸ್ಕಾರ! Movie ಅಥವಾ Web Series ಹೆಸರು ಕಳುಹಿಸಿ. TMDB details ಕೊಡುತ್ತೇನೆ."
     )
 
