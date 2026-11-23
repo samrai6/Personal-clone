@@ -206,8 +206,9 @@ async def find_matching_titles(query):
             name = item.get("title") if kind == "movie" else item.get("name")
             if not name:
                 continue
-            key = name.casefold()
-            if key == query.casefold() or key in seen:
+            key = re.sub(r"[^a-z0-9]+", "", name.casefold())
+            clean_query = re.sub(r"[^a-z0-9]+", "", query.casefold())
+            if key == clean_query or key in seen:
                 continue
             seen.add(key)
             ratio = title_similarity(query, name)
@@ -309,10 +310,14 @@ async def show_movie(message, query, group_check=False):
     if not result:
         return await show_title_suggestions(message, query)
 
-    # Strong title matches are shown directly. For a weak/possibly unrelated
-    # result, ask the user whether one of the closest titles is what they meant.
+    # In PM, show details only when the searched title exactly matches
+    # the TMDB title (ignoring spaces and punctuation). Otherwise show
+    # the same spelling suggestions used in groups.
     kind, item, similarity = result
-    if similarity < 0.65:
+    matched_title = item.get("title") if kind == "movie" else item.get("name")
+    clean_query = re.sub(r"[^a-z0-9]+", "", query.casefold())
+    clean_title = re.sub(r"[^a-z0-9]+", "", (matched_title or "").casefold())
+    if not clean_query or clean_query != clean_title:
         return await show_title_suggestions(message, query)
 
     details = await title_details(kind, item)
