@@ -111,7 +111,7 @@ async def show_movie(message, query, group_check=False):
         html.escape(details["overview"]),
     ]
     keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🎬 Search in @Samp_yu5bot", url=movie_link(details["title"]))
+        InlineKeyboardButton(f"🎬 {details['title']}", url=movie_link(details["title"]))
     ]])
     caption = "\n".join(lines)
     poster = details.get("poster")
