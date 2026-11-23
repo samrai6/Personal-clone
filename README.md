@@ -15,7 +15,7 @@ Kannada/English Telegram assistant with PM AI chat, movie information, movie-sea
 1. Create a Telegram bot with `@BotFather` and copy its token.
 2. Create a MongoDB Atlas cluster and copy its connection string.
 3. Create a Gemini API key at https://aistudio.google.com/apikey.
-4. Copy `.env.example` values into your hosting environment (or local `.env`).
+4. Add these required environment variables to your hosting environment (or local `.env`): `BOT_TOKEN`, `MONGODB_URI`, and `GEMINI_API_KEY`. `ADMIN_IDS` is optional.
 5. Install and run:
 
 ```bash
@@ -28,9 +28,9 @@ python bot.py
 Create a **Background Worker** connected to this repository.
 - Build command: `pip install -r requirements.txt`
 - Start command: `python bot.py`
-- Add all required environment variables from `.env.example`.
+- Add `BOT_TOKEN`, `MONGODB_URI`, and `GEMINI_API_KEY`. Optionally add `ADMIN_IDS` for admin quota bypass.
 
-For Koyeb, use the same build/start commands and environment variables.
+For Koyeb, use the same build/start commands and the same environment variables.
 
 ## Notes
 
