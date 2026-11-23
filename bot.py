@@ -724,10 +724,19 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         answer = await generate_answer(prompt)
         await status.edit_text((answer or "ಕ್ಷಮಿಸಿ, ಉತ್ತರ ಸಿಗಲಿಲ್ಲ.")[:3900])
     except Exception as exc:
-        log.warning("Gemini request failed (%s)", type(exc).__name__)
-        await status.edit_text(
-            "Gemini AI ಈಗ ಲಭ್ಯವಿಲ್ಲ ಅಥವಾ free quota ಮುಗಿದಿದೆ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ."
-        )
+        error_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+        error_text = str(exc).lower()
+        log.exception("Gemini request failed (code=%s)", error_code)
+
+        if error_code == 429 or "quota" in error_text or "resource_exhausted" in error_text:
+            user_error = "Gemini Free quota ಮುಗಿದಿದೆ. Quota reset ಆದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+        elif error_code in (401, 403) or "api key" in error_text or "permission_denied" in error_text:
+            user_error = "Gemini API key ತಪ್ಪಾಗಿದೆ ಅಥವಾ API access ಇಲ್ಲ. Render‌ನ GEMINI_API_KEY ಪರಿಶೀಲಿಸಿ."
+        elif error_code == 404 or "not_found" in error_text:
+            user_error = "Gemini model ಲಭ್ಯವಿಲ್ಲ. Model ಹೆಸರು/API access ಪರಿಶೀಲಿಸಬೇಕು."
+        else:
+            user_error = "Gemini API ಸಂಪರ್ಕದಲ್ಲಿ ಸಮಸ್ಯೆಯಾಗಿದೆ. Render Logs ನೋಡಿ."
+        await status.edit_text(user_error)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
