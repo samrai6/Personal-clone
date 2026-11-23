@@ -54,6 +54,8 @@ COUNTRY = "IN"
 
 # Use PostgreSQL when DATABASE_URL is configured (recommended for Render).
 # SQLite remains available for local testing, but its data is not durable on Render Free.
+MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
+MONGODB_NAME = "personal_clone"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DATA_DIR = Path(os.getenv("DATA_DIR", "."))
 try:
@@ -61,6 +63,65 @@ try:
 except OSError:
     DATA_DIR = Path(".")
 DB_PATH = DATA_DIR / "personal_clone.db"
+
+
+class MongoCursor:
+    def __init__(self, row=None):
+        self.row = row
+
+    def fetchone(self):
+        if not self.row:
+            return None
+        if "value" in self.row:
+            return (self.row["value"],)
+        if "user_id" in self.row:
+            return (self.row["user_id"],)
+        return None
+
+
+class MongoDatabaseConnection:
+    """Small adapter retaining the existing SQL-style calls over MongoDB."""
+    def __init__(self):
+        from pymongo import MongoClient
+        self.client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=10000)
+        self.db = self.client[MONGODB_NAME]
+        # Fail fast if the URI is invalid or MongoDB is unreachable.
+        self.client.admin.command("ping")
+        self.settings = self.db["settings"]
+        self.relay_map = self.db["relay_map"]
+
+    def execute(self, sql, params=()):
+        normalized = " ".join(sql.lower().split())
+        if normalized.startswith("create table"):
+            return MongoCursor()
+        if normalized.startswith("select value from settings"):
+            return MongoCursor(self.settings.find_one({"key": params[0]}))
+        if normalized.startswith("insert into settings"):
+            self.settings.update_one(
+                {"key": params[0]},
+                {"$set": {"value": str(params[1])}},
+                upsert=True,
+            )
+            return MongoCursor()
+        if normalized.startswith("delete from settings"):
+            self.settings.delete_one({"key": params[0]})
+            return MongoCursor()
+        if normalized.startswith("insert or replace into relay_map"):
+            self.relay_map.replace_one(
+                {"source_message_id": int(params[0])},
+                {"source_message_id": int(params[0]), "user_id": int(params[1])},
+                upsert=True,
+            )
+            return MongoCursor()
+        if normalized.startswith("select user_id from relay_map"):
+            return MongoCursor(self.relay_map.find_one({"source_message_id": int(params[0])}))
+        raise NotImplementedError("Unsupported database query")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.client.close()
 
 
 class DatabaseConnection:
@@ -87,6 +148,8 @@ class DatabaseConnection:
 
 
 def db_connect():
+    if MONGODB_URI:
+        return MongoDatabaseConnection()
     if DATABASE_URL:
         import psycopg
         database_url = DATABASE_URL
