@@ -182,6 +182,25 @@ def get_source_channel():
     return int(row[0]) if row else None
 
 
+def is_ai_enabled():
+    """AI switch is stored in the existing persistent settings database."""
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key=?",
+            ("ai_enabled",),
+        ).fetchone()
+    return bool(row and str(row[0]).strip().lower() in {"1", "true", "yes", "on"})
+
+
+def set_ai_enabled(enabled):
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("ai_enabled", "true" if enabled else "false"),
+        )
+
+
 def set_source_channel(chat_id):
     with db_connect() as conn:
         conn.execute(
@@ -651,6 +670,66 @@ async def private_non_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_text_auto(message, "Message Source Channel‌ಗೆ ಕಳುಹಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.")
 
 
+async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Private-message Gemini command; enable state persists in MongoDB settings."""
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user or message.chat.type != "private":
+        return
+
+    args = context.args or []
+    action = args[0].lower() if args else ""
+
+    if action in {"on", "off"}:
+        if user.id != OWNER_ID:
+            await message.reply_text("ಈ setting Owner ಮಾತ್ರ ಬದಲಾಯಿಸಬಹುದು.")
+            return
+        if action == "on":
+            if not os.getenv("GEMINI_API_KEY", "").strip():
+                await message.reply_text(
+                    "Gemini API key configure ಆಗಿಲ್ಲ. Render-ನಲ್ಲಿ GEMINI_API_KEY secret ಸೇರಿಸಿ."
+                )
+                return
+            set_ai_enabled(True)
+            await message.reply_text("✅ Gemini AI ON ಆಯಿತು. ಇದು restart ಆದರೂ ON ಆಗಿಯೇ ಇರುತ್ತದೆ.")
+        else:
+            set_ai_enabled(False)
+            await message.reply_text("⛔ Gemini AI OFF ಆಯಿತು.")
+        return
+
+    if action == "status":
+        state = "ON" if is_ai_enabled() else "OFF"
+        await message.reply_text(f"Gemini AI Status: {state}")
+        return
+
+    if not args:
+        await message.reply_text(
+            "ಬಳಕೆ:\n/ai on - AI ON (Owner ಮಾತ್ರ)\n/ai off - AI OFF (Owner ಮಾತ್ರ)\n"
+            "/ai status - Status\n/ai ನಿಮ್ಮ ಪ್ರಶ್ನೆ - AI ಜೊತೆ chat"
+        )
+        return
+
+    if not is_ai_enabled():
+        await message.reply_text("Gemini AI ಈಗ OFF ಇದೆ.")
+        return
+
+    prompt = " ".join(args).strip()
+    if len(prompt) > 3500:
+        await message.reply_text("ಪ್ರಶ್ನೆ ತುಂಬಾ ಉದ್ದವಾಗಿದೆ. ದಯವಿಟ್ಟು ಚಿಕ್ಕದಾಗಿ ಕಳುಹಿಸಿ.")
+        return
+
+    status = await message.reply_text("🤖 ಉತ್ತರ ಸಿದ್ಧಪಡಿಸಲಾಗುತ್ತಿದೆ...")
+    try:
+        from gemini_ai import generate_answer
+        answer = await generate_answer(prompt)
+        await status.edit_text((answer or "ಕ್ಷಮಿಸಿ, ಉತ್ತರ ಸಿಗಲಿಲ್ಲ.")[:3900])
+    except Exception as exc:
+        log.warning("Gemini request failed (%s)", type(exc).__name__)
+        await status.edit_text(
+            "Gemini AI ಈಗ ಲಭ್ಯವಿಲ್ಲ ಅಥವಾ free quota ಮುಗಿದಿದೆ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ."
+        )
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     payload = context.args[0] if context.args else ""
@@ -752,6 +831,7 @@ def main():
     # React to incoming PM and group messages without interrupting existing handlers.
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
+    app.add_handler(CommandHandler("ai", ai_command))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("fs", fs_command))
     app.add_handler(CallbackQueryHandler(fs_callback, pattern=r"^fs:"))
