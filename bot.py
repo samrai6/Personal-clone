@@ -411,9 +411,34 @@ async def relay_private_message(message, context: ContextTypes.DEFAULT_TYPE):
     return True
 
 
+def airbrother_text_link(title):
+    """Build an AirbrotherBot compose link, separating uppercase acronyms."""
+    words = re.findall(r"[A-Za-z0-9]+", title.strip())
+    parts = []
+    for word in words:
+        if word.isalpha() and word.isupper() and len(word) > 1:
+            parts.extend(list(word))
+        else:
+            parts.append(word.capitalize())
+    slug = "-".join(parts) or "movie"
+    return f"https://t.me/AirbrotherBot?text={slug}"
+
+
 async def send_owner_reply_to_user(message, user_id, context):
-    """Mask a Telegram getfile URL as its movie title in the user's PM."""
+    """Deliver owner shortcuts and links to the original user's PM."""
     text = message.text or message.caption
+    shortcut = re.match(r"^\s*s\s*-\s*(.+?)\s*$", text or "", flags=re.IGNORECASE)
+    if shortcut:
+        title = shortcut.group(1)
+        url = airbrother_text_link(title)
+        sent = await context.bot.send_message(
+            chat_id=user_id,
+            text=f'<a href="{html.escape(url, quote=True)}">{html.escape(title)}</a>',
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        asyncio.create_task(delete_later(context.bot, user_id, sent.message_id, 600))
+        return
     if text and text.strip().startswith("https://t.me/") and "?start=getfile-" in text:
         match = re.search(r"getfile-([A-Za-z0-9-]+)", text)
         if match:
