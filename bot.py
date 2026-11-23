@@ -157,11 +157,10 @@ async def show_title_suggestions(message, query):
         for index, name in enumerate(matches, start=1)
     )
     await message.reply_text(
-        "<b>ನಿಮ್ಮ ಮೂವೀ / ವೆಬ್ ಸೀರೀಸ್ ಹೆಸರಿನ ಸ್ಪೆಲ್ಲಿಂಗ್ ತಪ್ಪಾಗಿದೆ.\\n"
+        "<b>ನೀವು ಹುಡುಕುತ್ತಿರುವ Movie / Web Series ಇದರಲ್ಲಿ ಇರಬಹುದೇ?\\n"
         "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\\n"
         f"{suggestions}\\n\\n"
-        "<b>Your Movie / Web Series title spelling is incorrect.\\n"
-        "Matching titles:</b>\\n"
+        "<b>Did you mean one of these?</b>\\n"
         f"{suggestions}",
         parse_mode="HTML",
         reply_to_message_id=message.message_id,
@@ -178,9 +177,12 @@ async def show_movie(message, query, group_check=False):
         await show_title_suggestions(message, query)
         return
 
-    # If TMDB returns a matching result, show it directly in private chat.
-    # Only show spelling suggestions when no title result is found.
+    # Strong title matches are shown directly. For a weak/possibly unrelated
+    # result, ask the user whether one of the closest titles is what they meant.
     kind, item, similarity = result
+    if similarity < 0.65:
+        await show_title_suggestions(message, query)
+        return
 
     details = await title_details(kind, item)
     release_lines, provider_lines = await release_and_ott(kind, item["id"])
