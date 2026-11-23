@@ -671,7 +671,7 @@ async def private_non_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Private-message Gemini command; enable state persists in MongoDB settings."""
+    """Private-message OpenRouter AI command; enable state persists in MongoDB settings."""
     message = update.effective_message
     user = update.effective_user
     if not message or not user or message.chat.type != "private":
@@ -737,10 +737,9 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif error_code in (408, 500, 502, 503, 504) or any(
             term in error_text for term in ("unavailable", "overloaded", "timeout")
         ):
-            user_error = (
-                "Google Gemini server ಈಗ ತಾತ್ಕಾಲಿಕವಾಗಿ busy ಇದೆ. "
-                "Primary Gemini model ಮತ್ತು fallback model ಎರಡನ್ನೂ ಪ್ರಯತ್ನಿಸಿದೆ. Google server busy ಇದೆ; ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
-            )
+            user_error = "OpenRouter Free AI model ಈಗ busy ಇದೆ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+        elif error_code == 402:
+            user_error = "OpenRouter account balance ಸಮಸ್ಯೆಯಿಂದ Free model ಬಳಸಲು ಆಗುತ್ತಿಲ್ಲ. OpenRouter account ಪರಿಶೀಲಿಸಿ."
         else:
             user_error = "OpenRouter API ಸಂಪರ್ಕದಲ್ಲಿ ಸಮಸ್ಯೆಯಾಗಿದೆ. Render Logs ನೋಡಿ."
         await status.edit_text(user_error)
