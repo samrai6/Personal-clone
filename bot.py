@@ -103,29 +103,39 @@ async def title_details(kind, item):
 
 
 async def release_and_ott(kind, item_id):
-    """Fetch India-only theatrical/digital dates and streaming providers."""
+    """Fetch worldwide theatrical/first-air dates and India-only OTT data."""
     release_lines, provider_lines = [], []
     if kind == "movie":
         try:
             data = await tmdb_get(f"/movie/{item_id}/release_dates")
-            india = next((country for country in data.get("results", []) if country.get("iso_3166_1") == "IN"), None)
-            if india:
-                dates = india.get("release_dates", [])
-                theatrical = list(dict.fromkeys(x.get("release_date", "")[:10] for x in dates if x.get("type") == 3 and x.get("release_date")))
-                digital = list(dict.fromkeys(x.get("release_date", "")[:10] for x in dates if x.get("type") == 4 and x.get("release_date")))
-                release_lines.append("🇮🇳 India — 🎥 Theatrical: " + (", ".join(theatrical) or "Not listed") + " | 📺 Digital: " + (", ".join(digital) or "Not listed"))
+            countries = []
+            for country in data.get("results", []):
+                code = country.get("iso_3166_1")
+                dates = country.get("release_dates", [])
+                theatrical = list(dict.fromkeys(
+                    x.get("release_date", "")[:10]
+                    for x in dates if x.get("type") == 3 and x.get("release_date")
+                ))
+                if code and theatrical:
+                    countries.append((code, theatrical))
+            countries.sort(key=lambda row: (row[0] != "US", row[0] != "IN", row[0]))
+            if countries:
+                release_lines.extend(
+                    f"🌍 {code}: " + ", ".join(dates)
+                    for code, dates in countries
+                )
             else:
-                release_lines.append("🇮🇳 India release-date details are not listed yet.")
+                release_lines.append("Worldwide theatrical release dates are not listed yet.")
         except Exception as exc:
-            log.info("India release-date lookup unavailable (%s)", type(exc).__name__)
-            release_lines.append("🇮🇳 India release-date details are currently unavailable.")
+            log.info("Worldwide release-date lookup unavailable (%s)", type(exc).__name__)
+            release_lines.append("Worldwide release-date details are currently unavailable.")
     else:
         try:
             tv = await tmdb_get(f"/tv/{item_id}")
-            release_lines.append("🇮🇳 India — First air date: " + (tv.get("first_air_date") or "Not announced"))
+            release_lines.append("🌍 Worldwide first air date: " + (tv.get("first_air_date") or "Not announced"))
         except Exception as exc:
             log.info("TV date lookup unavailable (%s)", type(exc).__name__)
-            release_lines.append("🇮🇳 India release-date details are currently unavailable.")
+            release_lines.append("Worldwide release-date details are currently unavailable.")
     try:
         data = await tmdb_get(f"/{kind}/{item_id}/watch/providers")
         india = (data.get("results") or {}).get("IN") or {}
@@ -188,7 +198,6 @@ async def show_movie(message, query, group_check=False):
     release_lines, provider_lines = await release_and_ott(kind, item["id"])
     lines = [
         f"🎬 <b>{html.escape(details['title'])} ({html.escape(details['year'])})</b>",
-        f"⭐ <b>Rating:</b> {html.escape(details['rating'])}",
         f"📌 <b>Type:</b> {details['kind']}",
         f"📅 <b>Release:</b> {html.escape(details['date'])}",
         f"🎭 <b>Genre:</b> {html.escape(details['genres'])}",
