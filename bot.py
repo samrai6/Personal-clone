@@ -411,6 +411,29 @@ async def relay_private_message(message, context: ContextTypes.DEFAULT_TYPE):
     return True
 
 
+async def send_owner_reply_to_user(message, user_id, context):
+    """Mask a Telegram getfile URL as its movie title in the user's PM."""
+    text = message.text or message.caption
+    if text and text.strip().startswith("https://t.me/") and "?start=getfile-" in text:
+        match = re.search(r"getfile-([A-Za-z0-9-]+)", text)
+        if match:
+            title = match.group(1).replace("-", " ")
+            sent = await context.bot.send_message(
+                chat_id=user_id,
+                text=f'<a href="{html.escape(text.strip(), quote=True)}">{html.escape(title)}</a>',
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+            asyncio.create_task(delete_later(context.bot, user_id, sent.message_id, 600))
+            return
+    copied = await context.bot.copy_message(
+        chat_id=user_id,
+        from_chat_id=message.chat_id,
+        message_id=message.message_id,
+    )
+    asyncio.create_task(delete_later(context.bot, user_id, copied.message_id, 600))
+
+
 async def source_channel_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.channel_post
     if not message or message.chat_id != get_source_channel():
@@ -423,12 +446,7 @@ async def source_channel_reply(update: Update, context: ContextTypes.DEFAULT_TYP
     if not user_id:
         return
     try:
-        copied = await context.bot.copy_message(
-            chat_id=user_id,
-            from_chat_id=message.chat_id,
-            message_id=message.message_id,
-        )
-        asyncio.create_task(delete_later(context.bot, user_id, copied.message_id, 600))
+        await send_owner_reply_to_user(message, user_id, context)
     except Exception as exc:
         log.warning("Could not deliver source-channel reply (%s)", type(exc).__name__)
 
@@ -450,12 +468,7 @@ async def source_discussion_reply(update: Update, context: ContextTypes.DEFAULT_
     if not user_id:
         return
     try:
-        copied = await context.bot.copy_message(
-            chat_id=user_id,
-            from_chat_id=message.chat_id,
-            message_id=message.message_id,
-        )
-        asyncio.create_task(delete_later(context.bot, user_id, copied.message_id, 600))
+        await send_owner_reply_to_user(message, user_id, context)
     except Exception as exc:
         log.warning("Discussion reply delivery failed (%s)", type(exc).__name__)
 
