@@ -37,21 +37,42 @@ def parse_json(text):
     return None
 
 
-async def gemini(prompt):
-    result = await ai.aio.models.generate_content(
-        model=MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
+async def gemini(prompt, use_search=False):
+    config = None
+    if use_search:
+        config = types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())]
-        ),
+        )
+    result = await ai.aio.models.generate_content(
+        model=MODEL, contents=prompt, config=config
     )
     return result.text or ""
 
 
-def movie_link(title):
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", title).strip("-")
+def movie_link(title, search_term=None):
+    # The linked movie bot expects the getfile-<title> start parameter.
+    term = str(search_term or title).strip()
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", term).strip("-")
+    if not slug:
+        slug = "movie"
     payload = ("getfile-" + slug)[:64].strip("-")
     return "https://t.me/" + MOVIE_BOT + "?start=" + payload
+
+
+def needs_movie_search(text):
+    value = text.casefold()
+    keywords = [
+        "movie", "film", "ott", "release", "cast", "rating", "story",
+        "web series", "cinema", "ಮೂವಿ", "ಸಿನಿಮಾ", "ಬಿಡುಗಡೆ", "ನಟ",
+        "ನಟಿ", "ಕಥೆ", "ಯಾವಾಗ", "ಮಾಹಿತಿ", "ಒಟಿಟಿ"
+    ]
+    if any(word in value for word in keywords):
+        return True
+    casual = ("hi", "hello", "hey", "how are you", "who are you", "thanks", "thank you")
+    if value in casual or "?" in value:
+        return False
+    # Short standalone phrases are commonly movie titles.
+    return len(value.split()) <= 6
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -70,24 +91,28 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not allowed:
             await msg.reply_text("ನಿಮ್ಮ ಇಂದಿನ 50 AI messages ಮುಗಿದಿವೆ. ನಾಳೆ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.")
             return
+
     status = await msg.reply_text("⏳ ಉತ್ತರ ಹುಡುಕುತ್ತಿದ್ದೇನೆ...")
+    search_enabled = needs_movie_search(msg.text)
     prompt = f"""
 You are a helpful bilingual Kannada/English Telegram assistant.
 User message: {msg.text!r}
-Use Google Search grounding for current movie and OTT facts. Do not invent cast, ratings,
-OTT platforms, or dates. If an OTT date is not officially announced, say Not announced.
-If reliable sources report an estimated OTT date, label it Unconfirmed estimate.
-If the message is only a movie/web-series title, return JSON:
-{{"kind":"movie","title":"official title","language":"...","release":"theatre date or Unknown","cast":"...","plot":"one-line spoiler-free plot","rating":"rating and source or Unknown","ott_status":"...","ott_platform":"...","ott_date":"official date or Not announced","expected_ott_date":"estimate or Not announced","reply":"short response"}}
+If web search grounding is available, use it for current movie/OTT facts. Never invent
+cast, ratings, OTT platforms, or dates. If an OTT date is not officially announced,
+say Not announced. Only provide an estimated date when reliable sources report it,
+and label it Unconfirmed estimate.
+If the user mentions a named movie or web series, or sends only its title, return JSON:
+{{"kind":"movie","title":"official title","search_term":"short ASCII/English title suitable for a movie search link","language":"...","release":"theatre date or Unknown","cast":"...","plot":"one-line spoiler-free plot","rating":"rating and source or Unknown","ott_status":"...","ott_platform":"...","ott_date":"official date or Not announced","expected_ott_date":"estimate or Not announced","reply":"short answer in user's language"}}
 For any other message return JSON: {{"kind":"chat","reply":"helpful answer in user's language"}}.
-Return JSON only.
+Return JSON only. Do not use markdown fences.
 """
     try:
-        data = parse_json(await gemini(prompt))
+        data = parse_json(await gemini(prompt, use_search=search_enabled))
         if not isinstance(data, dict):
-            answer, title = "ಕ್ಷಮಿಸಿ, ಉತ್ತರ ಸಿದ್ಧಪಡಿಸಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.", None
+            answer, title, search_term = "ಕ್ಷಮಿಸಿ, ಉತ್ತರ ಸಿದ್ಧಪಡಿಸಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.", None, None
         elif data.get("kind") == "movie" and data.get("title"):
             title = str(data["title"]).strip()
+            search_term = str(data.get("search_term") or title).strip()
             fields = [
                 ("Language", "language"), ("Theatre Release", "release"),
                 ("Cast", "cast"), ("Story", "plot"), ("Rating", "rating"),
@@ -97,7 +122,7 @@ Return JSON only.
             lines = ["🎬 <b>" + html.escape(title) + "</b>"]
             for label, key in fields:
                 value = str(data.get(key) or "").strip()
-                if value and value.lower() not in ("unknown", "not announced", "n/a"):
+                if value and value.lower() not in ("unknown", "n/a", "none"):
                     lines.append("<b>" + label + ":</b> " + html.escape(value))
                 elif key in ("ott_date", "expected_ott_date"):
                     lines.append("<b>" + label + ":</b> Not announced")
@@ -105,12 +130,12 @@ Return JSON only.
                 lines.extend(["", html.escape(str(data["reply"]))])
             answer = "\n".join(lines)
         else:
-            title = None
+            title, search_term = None, None
             answer = str(data.get("reply") or "ಕ್ಷಮಿಸಿ, ಉತ್ತರ ಸಿದ್ಧಪಡಿಸಲು ಆಗಲಿಲ್ಲ.")
         keyboard = None
         if title:
             keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🎬 Search in @" + MOVIE_BOT, url=movie_link(title))
+                InlineKeyboardButton("🎬 Search in @" + MOVIE_BOT, url=movie_link(title, search_term))
             ]])
         await status.edit_text(answer, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
     except Exception:
@@ -132,7 +157,7 @@ Return JSON only: {{"is_title":true/false,"correct_title":"verified title","conf
 Only set confidence >= 0.90 if verified. Never guess.
 """
     try:
-        data = parse_json(await gemini(prompt))
+        data = parse_json(await gemini(prompt, use_search=True))
         if not isinstance(data, dict) or not data.get("is_title"):
             return
         correct = str(data.get("correct_title") or "").strip()
