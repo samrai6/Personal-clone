@@ -178,11 +178,9 @@ async def show_movie(message, query, group_check=False):
         await show_title_suggestions(message, query)
         return
 
+    # If TMDB returns a matching result, show it directly in private chat.
+    # Only show spelling suggestions when no title result is found.
     kind, item, similarity = result
-    # In private chat, treat weak title matches as spelling mistakes too.
-    if similarity < 0.65:
-        await show_title_suggestions(message, query)
-        return
 
     details = await title_details(kind, item)
     release_lines, provider_lines = await release_and_ott(kind, item["id"])
