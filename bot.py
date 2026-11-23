@@ -4,11 +4,13 @@ import html
 import logging
 import os
 import re
+import sqlite3
+from pathlib import Path
 from difflib import SequenceMatcher
 
 import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, ContextTypes, filters
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,7 +25,67 @@ TMDB_BEARER_TOKEN = base64.b64decode("ZXlKaGJHY2lPaUpJVXpJMU5pSjkuZXlKaGRXUWlPaU
 MOVIE_BOT = "Samp_yu5bot"
 TMDB_BASE = "https://api.themoviedb.org/3"
 LANGUAGE = "en-US"
+
 COUNTRY = "IN"
+
+# Source-channel settings and reply routing are stored on Render's persistent disk.
+DATA_DIR = Path(os.getenv("DATA_DIR", "/var/data"))
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    DATA_DIR = Path(".")
+DB_PATH = DATA_DIR / "personal_clone.db"
+
+
+def db_connect():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS relay_map (source_message_id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL)")
+    return conn
+
+
+def get_source_channel():
+    with db_connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key='source_channel_id'").fetchone()
+    return int(row[0]) if row else None
+
+
+def set_source_channel(chat_id):
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES('source_channel_id', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(chat_id),),
+        )
+
+
+def remove_source_channel():
+    with db_connect() as conn:
+        conn.execute("DELETE FROM settings WHERE key='source_channel_id'")
+
+
+def save_relay_mapping(source_message_id, user_id):
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO relay_map(source_message_id, user_id) VALUES(?, ?)",
+            (source_message_id, user_id),
+        )
+
+
+def get_relay_user(source_message_id):
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM relay_map WHERE source_message_id=?",
+            (source_message_id,),
+        ).fetchone()
+    return int(row[0]) if row else None
+
+
+def source_settings_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Set Source" if not get_source_channel() else "🔄 Change Source", callback_data="fs:set")],
+        [InlineKeyboardButton("🗑 Remove Source", callback_data="fs:remove")],
+    ])
 
 
 def auto_delete_delay(chat_type):
@@ -205,6 +267,7 @@ async def show_title_suggestions(message, query):
         parse_mode="HTML",
         reply_to_message_id=message.message_id,
     )
+    return True
 
 
 async def show_movie(message, query, group_check=False):
@@ -214,15 +277,13 @@ async def show_movie(message, query, group_check=False):
 
     result = await find_title(query)
     if not result:
-        await show_title_suggestions(message, query)
-        return
+        return await show_title_suggestions(message, query)
 
     # Strong title matches are shown directly. For a weak/possibly unrelated
     # result, ask the user whether one of the closest titles is what they meant.
     kind, item, similarity = result
     if similarity < 0.65:
-        await show_title_suggestions(message, query)
-        return
+        return await show_title_suggestions(message, query)
 
     details = await title_details(kind, item)
     release_lines, provider_lines = await release_and_ott(kind, item["id"])
@@ -261,6 +322,132 @@ async def show_movie(message, query, group_check=False):
         await reply_text_auto(message, caption, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
 
 
+
+async def fs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+    channel_id = get_source_channel()
+    status = f"Current Source Channel ID: {channel_id}" if channel_id else "Source Channel ಇನ್ನೂ set ಆಗಿಲ್ಲ."
+    await reply_text_auto(
+        update.effective_message,
+        f"<b>Source Channel Settings</b>\\n{status}\\n\\nಕೆಳಗಿನ buttons ಬಳಸಿ:",
+        parse_mode="HTML",
+        reply_markup=source_settings_keyboard(),
+    )
+
+
+async def fs_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query.from_user.id != OWNER_ID:
+        await query.answer("Owner ಮಾತ್ರ ಬಳಸಬಹುದು.", show_alert=True)
+        return
+    await query.answer()
+    action = query.data.split(":", 1)[1]
+    if action == "set":
+        context.user_data["waiting_for_source_channel"] = True
+        await query.message.reply_text(
+            "Source Channel‌ನ ಯಾವುದಾದರೂ ಒಂದು post ಅನ್ನು ಇಲ್ಲಿ Forward ಮಾಡಿ.\\n"
+            "Bot ಆ Channel ಅನ್ನು Source ಆಗಿ save ಮಾಡುತ್ತದೆ."
+        )
+    elif action == "remove":
+        remove_source_channel()
+        context.user_data.pop("waiting_for_source_channel", None)
+        await query.edit_message_text(
+            "Source Channel ತೆಗೆದುಹಾಕಲಾಗಿದೆ.",
+            reply_markup=source_settings_keyboard(),
+        )
+
+
+async def accept_source_forward(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    if not message or update.effective_user.id != OWNER_ID:
+        return
+    if not context.user_data.get("waiting_for_source_channel"):
+        return
+    origin = message.forward_origin
+    source_chat = getattr(origin, "chat", None) if origin else None
+    if not source_chat or source_chat.type != "channel":
+        await reply_text_auto(message, "ದಯವಿಟ್ಟು Channel‌ನ original post ಅನ್ನು Forward ಮಾಡಿ.")
+        return
+    set_source_channel(source_chat.id)
+    context.user_data.pop("waiting_for_source_channel", None)
+    await reply_text_auto(
+        message,
+        f"✅ Source Channel set ಆಯಿತು.\\nChannel ID: <code>{source_chat.id}</code>",
+        parse_mode="HTML",
+    )
+
+
+async def relay_private_message(message, context: ContextTypes.DEFAULT_TYPE):
+    source_id = get_source_channel()
+    if not source_id:
+        return False
+    user = message.from_user
+    if not user:
+        return False
+    name = user.full_name or "Unknown"
+    username = f"@{user.username}" if user.username else "Not set"
+    header = (
+        "📩 New PM\\n"
+        f"Name: {name}\\n"
+        f"Username: {username}\\n"
+        f"User ID: {user.id}\\n"
+        "━━━━━━━━━━━━━━"
+    )
+    if message.text:
+        sent = await context.bot.send_message(
+            chat_id=source_id,
+            text=(header + "\\n" + message.text)[:4000],
+            disable_web_page_preview=True,
+        )
+        save_relay_mapping(sent.message_id, user.id)
+    else:
+        header_msg = await context.bot.send_message(chat_id=source_id, text=header)
+        save_relay_mapping(header_msg.message_id, user.id)
+        copied = await context.bot.copy_message(
+            chat_id=source_id,
+            from_chat_id=message.chat_id,
+            message_id=message.message_id,
+        )
+        save_relay_mapping(copied.message_id, user.id)
+    return True
+
+
+async def source_channel_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.channel_post
+    if not message or message.chat_id != get_source_channel():
+        return
+    if not message.reply_to_message or not message.from_user:
+        return
+    if message.from_user.id != OWNER_ID:
+        return
+    user_id = get_relay_user(message.reply_to_message.message_id)
+    if not user_id:
+        return
+    try:
+        copied = await context.bot.copy_message(
+            chat_id=user_id,
+            from_chat_id=message.chat_id,
+            message_id=message.message_id,
+        )
+        asyncio.create_task(delete_later(context.bot, user_id, copied.message_id, 600))
+    except Exception as exc:
+        log.warning("Could not deliver source-channel reply (%s)", type(exc).__name__)
+
+
+async def private_non_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    if not message or update.effective_user.id != message.from_user.id:
+        return
+    try:
+        sent = await relay_private_message(message, context)
+        if not sent:
+            await reply_text_auto(message, "Source Channel set ಮಾಡಲು /fs ಬಳಸಿ.")
+    except Exception:
+        log.exception("Private message relay failed")
+        await reply_text_auto(message, "Message Source Channel‌ಗೆ ಕಳುಹಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.")
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_text_auto(
         update.effective_message,
@@ -276,7 +463,11 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(query) < 2 or len(query) > 100:
         return
     try:
-        await show_movie(message, query)
+        handled = await show_movie(message, query)
+        if not handled:
+            sent = await relay_private_message(message, context)
+            if not sent:
+                await reply_text_auto(message, "ಹತ್ತಿರದ Movie / Web Series ಹೆಸರು ಸಿಗಲಿಲ್ಲ.\\nNo close matching titles found.")
     except httpx.HTTPStatusError as exc:
         log.warning("TMDB request failed with HTTP %s", exc.response.status_code)
         await reply_text_auto(message, "TMDB search ಈಗ ಲಭ್ಯವಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ.")
@@ -343,8 +534,13 @@ def main():
         raise SystemExit("Missing configuration: " + ", ".join(missing))
     app = ApplicationBuilder().token(TOKEN).post_init(startup_notify).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("fs", fs_command))
+    app.add_handler(CallbackQueryHandler(fs_callback, pattern=r"^fs:"))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.FORWARDED, accept_source_forward), group=-1)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, private_reply))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.TEXT & ~filters.COMMAND, private_non_text))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check))
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, source_channel_reply))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
