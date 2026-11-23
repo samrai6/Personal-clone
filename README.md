@@ -1,35 +1,40 @@
 # Personal Clone Telegram Bot
 
-Starter configuration for the Personal Clone bot.
+Kannada/English Telegram assistant with PM AI chat, movie information, movie-search deep links, group title spelling checks, and MongoDB daily quotas.
 
-## Daily AI message quota
+## Features
 
-- Each Telegram user gets **50 AI messages per India calendar day**.
-- The counter resets at **12:00 AM Asia/Kolkata**.
-- The limit is per user, not shared across all users.
-- Admin IDs configured in `ADMIN_IDS` are intended to bypass the quota.
-- MongoDB stores usage so it persists across bot restarts and deployments.
-- The quota module uses an atomic MongoDB update to prevent concurrent requests from exceeding the cap.
+- PM: Gemini-powered Kannada/English replies.
+- Movie title only: movie details plus a button opening the matching search in `@Samp_yu5bot`.
+- OTT: official platform/date when found; otherwise reports Not announced. Estimates must be labelled unconfirmed.
+- Groups: checks short title-like messages only and replies to the original message only when Google Search grounding verifies a different title with confidence >= 0.90. Ordinary group conversation is ignored.
+- Quota: 50 AI PM requests per user per India calendar day (IST), stored in MongoDB. Admin IDs in `ADMIN_IDS` bypass the quota. Group spelling checks are not counted.
 
-## Environment variables
+## Setup
 
-Copy `.env.example` to `.env` and configure:
+1. Create a Telegram bot with `@BotFather` and copy its token.
+2. Create a MongoDB Atlas cluster and copy its connection string.
+3. Create a Gemini API key at https://aistudio.google.com/apikey.
+4. Copy `.env.example` values into your hosting environment (or local `.env`).
+5. Install and run:
 
-- `BOT_TOKEN`
-- `MONGODB_URI`
-- `MONGODB_NAME`
-- `ADMIN_IDS` (optional, comma-separated Telegram user IDs)
-- `GEMINI_API_KEY` and `GEMINI_MODEL` when Gemini integration is added.
-
-## Quota module
-
-Import `DailyQuota` from `quota.py`, initialize it with a MongoDB database, then call:
-
-```python
-allowed, used = await quota.consume(message.from_user.id)
-if not allowed:
-    await message.reply_text("ನಿಮ್ಮ ಇಂದಿನ 50 AI messages ಮುಗಿದಿವೆ. ನಾಳೆ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.")
-    return
+```bash
+pip install -r requirements.txt
+python bot.py
 ```
 
-The bot handler should check whether the sender is an admin before calling `consume()`.
+## Render
+
+Create a **Background Worker** connected to this repository.
+- Build command: `pip install -r requirements.txt`
+- Start command: `python bot.py`
+- Add all required environment variables from `.env.example`.
+
+For Koyeb, use the same build/start commands and environment variables.
+
+## Notes
+
+- Gemini Free Tier has model-specific request/token limits and may change. The bot's 50/user/day quota is separate from Google's limits; high concurrent traffic can still hit provider rate limits.
+- Google Search grounding availability and quota depend on the Gemini model, region, and Google account/project. Current movie/OTT facts cannot be guaranteed if grounding is unavailable.
+- The movie link uses the `getfile-` start payload supported by the configured movie bot. The username and deep-link convention must remain valid.
+- Never commit real API keys, bot tokens, or the `.env` file.
