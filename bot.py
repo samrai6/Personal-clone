@@ -70,16 +70,29 @@ def movie_link(title):
     return f"https://t.me/{MOVIE_BOT}?start=" + ("getfile-" + slug)[:64].strip("-")
 
 
+def title_similarity(query, title):
+    """Compare titles while ignoring punctuation, spaces and common subtitles."""
+    clean_query = re.sub(r"[^a-z0-9]+", "", query.casefold())
+    clean_title = re.sub(r"[^a-z0-9]+", "", title.casefold())
+    if not clean_query or not clean_title:
+        return 0.0
+    if clean_query == clean_title or clean_title.startswith(clean_query):
+        return 1.0
+    if clean_query in clean_title:
+        return 0.95
+    return SequenceMatcher(None, clean_query, clean_title).ratio()
+
+
 async def find_title(query):
     """Search both movies and TV shows; prefer the strongest title match."""
     found = []
     for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
         data = await tmdb_get(endpoint, {"query": query, "include_adult": "false", "page": 1})
-        for item in data.get("results", [])[:5]:
+        for item in data.get("results", [])[:10]:
             name = item.get("title") if kind == "movie" else item.get("name")
             if not name:
                 continue
-            ratio = SequenceMatcher(None, query.casefold(), name.casefold()).ratio()
+            ratio = title_similarity(query, name)
             found.append((ratio, kind, item))
     if not found:
         return None
@@ -93,7 +106,7 @@ async def find_matching_titles(query):
     seen = set()
     for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
         data = await tmdb_get(endpoint, {"query": query, "include_adult": "false", "page": 1})
-        for item in data.get("results", [])[:5]:
+        for item in data.get("results", [])[:10]:
             name = item.get("title") if kind == "movie" else item.get("name")
             if not name:
                 continue
@@ -101,7 +114,7 @@ async def find_matching_titles(query):
             if key == query.casefold() or key in seen:
                 continue
             seen.add(key)
-            ratio = SequenceMatcher(None, query.casefold(), name.casefold()).ratio()
+            ratio = title_similarity(query, name)
             matches.append((ratio, float(item.get("popularity") or 0), name))
     matches.sort(key=lambda row: (row[0], row[1]), reverse=True)
     # Limit suggestions to the five closest matches.
