@@ -55,6 +55,26 @@ async def find_title(query):
     return found[0][1], found[0][2], found[0][0]
 
 
+async def find_matching_titles(query):
+    """Return distinct TMDB movie and TV title suggestions for group spelling help."""
+    matches = []
+    seen = set()
+    for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
+        data = await tmdb_get(endpoint, {"query": query, "include_adult": "false", "page": 1})
+        for item in data.get("results", [])[:5]:
+            name = item.get("title") if kind == "movie" else item.get("name")
+            if not name:
+                continue
+            key = name.casefold()
+            if key == query.casefold() or key in seen:
+                continue
+            seen.add(key)
+            ratio = SequenceMatcher(None, query.casefold(), name.casefold()).ratio()
+            matches.append((ratio, float(item.get("popularity") or 0), name))
+    matches.sort(key=lambda row: (row[0], row[1]), reverse=True)
+    return [name for _, _, name in matches]
+
+
 async def title_details(kind, item):
     item_id = item["id"]
     append = "credits,external_ids"
@@ -78,27 +98,29 @@ async def title_details(kind, item):
 
 
 async def show_movie(message, query, group_check=False):
-    result = await find_title(query)
-    if not result:
-        if not group_check:
-            await message.reply_text("TMDBನಲ್ಲಿ ಈ Movie / Web Series ಸಿಗಲಿಲ್ಲ. Title spelling ಪರಿಶೀಲಿಸಿ.")
-        return
-
-    kind, item, similarity = result
-    canonical = item.get("title") if kind == "movie" else item.get("name")
-    if not canonical:
-        return
-
-    # In groups, only reply when TMDB suggests a likely spelling correction.
     if group_check:
-        if canonical.casefold() == query.casefold() or similarity < 0.72:
+        matches = await find_matching_titles(query)
+        if not matches:
             return
+        suggestions = "\n".join(f"• <code>{html.escape(name)}</code>" for name in matches)
         await message.reply_text(
-            "ನಿಮ್ಮ ಮೂವೀ ಸ್ಪೆಲ್ಲಿಂಗ್ ತಪ್ಪಾಗಿದೆ\nYour movie spelling is wrong\n\nCorrect spelling: " + canonical,
+            "<b>ನಿಮ್ಮ ಮೂವೀ / ವೆಬ್ ಸೀರೀಸ್ ಹೆಸರಿನ ಸ್ಪೆಲ್ಲಿಂಗ್ ತಪ್ಪಾಗಿದೆ.\n"
+            "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\n"
+            f"{suggestions}\n\n"
+            "<b>Your Movie / Web Series title spelling is incorrect.\n"
+            "Matching titles:</b>\n"
+            f"{suggestions}",
+            parse_mode="HTML",
             reply_to_message_id=message.message_id,
         )
         return
 
+    result = await find_title(query)
+    if not result:
+        await message.reply_text("TMDBನಲ್ಲಿ ಈ Movie / Web Series ಸಿಗಲಿಲ್ಲ. Title spelling ಪರಿಶೀಲಿಸಿ.")
+        return
+
+    kind, item, similarity = result
     details = await title_details(kind, item)
     lines = [
         f"🎬 <b>{html.escape(details['title'])} ({html.escape(details['year'])})</b>",
@@ -131,10 +153,9 @@ async def show_movie(message, query, group_check=False):
         )
 
 
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
-        "ನಮಸ್ಕಾರ! Movie ಅಥವಾ Web Series ಹೆಸರು ಕಳುಹಿಸಿ. TMDB details ಮತ್ತು IMDb Search link ಕೊಡುತ್ತೇನೆ."
+        "ನಮಸ್ಕಾರ! Movie ಅಥವಾ Web Series ಹೆಸರು ಕಳುಹಿಸಿ. TMDB details ಕೊಡುತ್ತೇನೆ."
     )
 
 
