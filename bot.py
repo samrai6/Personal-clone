@@ -734,6 +734,13 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_error = "Gemini API key ತಪ್ಪಾಗಿದೆ ಅಥವಾ API access ಇಲ್ಲ. Render‌ನ GEMINI_API_KEY ಪರಿಶೀಲಿಸಿ."
         elif error_code == 404 or "not_found" in error_text:
             user_error = "Gemini model ಲಭ್ಯವಿಲ್ಲ. Model ಹೆಸರು/API access ಪರಿಶೀಲಿಸಬೇಕು."
+        elif error_code in (408, 500, 502, 503, 504) or any(
+            term in error_text for term in ("unavailable", "overloaded", "timeout")
+        ):
+            user_error = (
+                "Google Gemini server ಈಗ ತಾತ್ಕಾಲಿಕವಾಗಿ busy ಇದೆ. "
+                "Bot 3 ಬಾರಿ retry ಮಾಡಿದೆ; ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+            )
         else:
             user_error = "Gemini API ಸಂಪರ್ಕದಲ್ಲಿ ಸಮಸ್ಯೆಯಾಗಿದೆ. Render Logs ನೋಡಿ."
         await status.edit_text(user_error)
