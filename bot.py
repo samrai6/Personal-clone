@@ -45,7 +45,7 @@ async def react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = 1315244338
 # TMDB Read Access Token from Ironman poster plugin.
-TMDB_BEARER_TOKEN = os.getenv("TMDB_BEARER_TOKEN", "").strip()
+TMDB_BEARER_TOKEN = base64.b64decode("ZXlKaGJHY2lPaUpJVXpJMU5pSjkuZXlKaGRXUWlPaUkyWkdVM1lUSXlaR1UxWWpFNVlURmpObVV5WkdVNVpXRXlNekUyWm1ReE1DSXNJbTVpWmlJNk1UYzBOVE15TWpRMk1pNDFNek1zSW5OMVlpSTZJalk0TURjNE1XUmxZelZqT0RBek5XWmlNRGhoTmpFeE5DSXNJbk5qYjNCbGN5STZXeUpoY0dsZmNtVmhaQ0pkTENKMlpYSnphVzl1SWpveGZRLnJNTUoyLVBCSXY4WTd5YnhQSUVwSWx6VEVYenV3cm05cnVLeEFVQ0FzYnc=").decode("utf-8")
 MOVIE_BOT = "Samp_yu5bot"
 TMDB_BASE = "https://api.themoviedb.org/3"
 LANGUAGE = "en-US"
