@@ -73,7 +73,10 @@ async def find_matching_titles(query):
             ratio = SequenceMatcher(None, query.casefold(), name.casefold()).ratio()
             matches.append((ratio, float(item.get("popularity") or 0), name))
     matches.sort(key=lambda row: (row[0], row[1]), reverse=True)
-    return [name for _, _, name in matches]
+    # Show only the single closest title; avoid long, unrelated suggestion lists.
+    if not matches or matches[0][0] < 0.30:
+        return []
+    return [matches[0][2]]
 
 
 async def title_details(kind, item):
@@ -103,14 +106,10 @@ async def show_movie(message, query, group_check=False):
         matches = await find_matching_titles(query)
         if not matches:
             return
-        suggestions = "\n".join(f"• <code>{html.escape(name)}</code>" for name in matches)
+        suggestion = html.escape(matches[0])
         await message.reply_text(
-            "<b>ನಿಮ್ಮ ಮೂವೀ / ವೆಬ್ ಸೀರೀಸ್ ಹೆಸರಿನ ಸ್ಪೆಲ್ಲಿಂಗ್ ತಪ್ಪಾಗಿದೆ.\n"
-            "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\n"
-            f"{suggestions}\n\n"
-            "<b>Your Movie / Web Series title spelling is incorrect.\n"
-            "Matching titles:</b>\n"
-            f"{suggestions}",
+            f"ಸರಿಯಾದ ಹೆಸರು: <b>{suggestion}</b>\n"
+            f"Correct title: <b>{suggestion}</b>",
             parse_mode="HTML",
             reply_to_message_id=message.message_id,
         )
