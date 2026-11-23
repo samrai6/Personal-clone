@@ -15,6 +15,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN", "")
+OWNER_ID = 1315244338
 # TMDB Read Access Token from Ironman poster plugin.
 TMDB_BEARER_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI2ZGU3YTIyZGU1YjE5YTFjNmUyZGU5ZWEyMzE2ZmQxMCIsIm5iZiI6MTc0NTMyMjQ2Mi41MzMsInN1YiI6IjY4MDc4MWRlYzVjODAzNWZiMDhhNjExIiwic2NvcGVzIjpbImFwaV9yZWFkIl0sInZlcnNpb24iOjF9.rMMJ2-PBIv8Y7ybxPIEpIlzTEXzuwrm9ruKxAUCAsbw"
 MOVIE_BOT = "Samp_yu5bot"
@@ -189,13 +190,21 @@ async def group_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log.warning("Group TMDB title check failed (%s)", type(exc).__name__)
 
 
+async def startup_notify(app):
+    try:
+        await app.bot.send_message(chat_id=OWNER_ID, text="I'm.alive sir 🤓")
+        log.info("Startup notification sent to owner")
+    except Exception as exc:
+        log.warning("Startup notification failed (%s)", type(exc).__name__)
+
+
 def main():
     missing = []
     if not TOKEN:
         missing.append("BOT_TOKEN")
     if missing:
         raise SystemExit("Missing configuration: " + ", ".join(missing))
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).post_init(startup_notify).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, private_reply))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check))
