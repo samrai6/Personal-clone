@@ -188,6 +188,17 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(query) < 2 or len(query) > 100:
         return
     normalized = " ".join(query.casefold().split())
+    if "varanasi" in normalized:
+        await message.reply_text(
+            "🎬 Varanasi (2027)\\n\\n"
+            "🎥 ಥಿಯೇಟರ್ ಬಿಡುಗಡೆ: 7 ಏಪ್ರಿಲ್ 2027 (ನಿಗದಿತ ದಿನಾಂಕ).\\n"
+            "❌ ಸಿನಿಮಾ ಇನ್ನೂ OTTನಲ್ಲಿ ಬಿಡುಗಡೆಯಾಗಿಲ್ಲ.\\n"
+            "📺 OTT ಬಿಡುಗಡೆ ದಿನಾಂಕ ಮತ್ತು ಪ್ಲಾಟ್‌ಫಾರ್ಮ್ ಇನ್ನೂ ಅಧಿಕೃತವಾಗಿ ಘೋಷಣೆಯಾಗಿಲ್ಲ.\\n\\n"
+            "🎥 Theatrical release: 7 April 2027 (scheduled).\\n"
+            "❌ The movie is not available on OTT yet.\\n"
+            "📺 No official OTT release date or platform has been announced."
+        )
+        return
     if "ramayana" in normalized and "2026" in normalized:
         await message.reply_text(
             "🎬 Ramayana (2026)\n\n"
