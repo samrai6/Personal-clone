@@ -172,7 +172,7 @@ async def show_title_suggestions(message, query):
             "No close matching titles found."
         )
         return
-    suggestions = "\\n".join(
+    suggestions = "\n".join(
         f"{index}. <code>{html.escape(name)}</code>"
         for index, name in enumerate(matches, start=1)
     )
@@ -225,7 +225,7 @@ async def show_movie(message, query, group_check=False):
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("⬇️ Download", url=movie_link(details["title"]))
     ]])
-    caption = "\\n".join(lines)
+    caption = "\n".join(lines)
     poster = details.get("poster")
     if poster:
         await message.reply_photo(
