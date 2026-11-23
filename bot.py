@@ -187,6 +187,16 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = message.text.strip()
     if len(query) < 2 or len(query) > 100:
         return
+    normalized = " ".join(query.casefold().split())
+    if "ramayana" in normalized and "2026" in normalized:
+        await message.reply_text(
+            "🎬 Ramayana (2026)\n\n"
+            "❌ ಈ ಸಿನಿಮಾ ಇನ್ನೂ OTTನಲ್ಲಿ ಬಿಡುಗಡೆಯಾಗಿಲ್ಲ.\n"
+            "📺 OTT release date ಇನ್ನೂ ಅಧಿಕೃತವಾಗಿ ಘೋಷಣೆಯಾಗಿಲ್ಲ.\n\n"
+            "❌ This movie is not available on OTT yet.\n"
+            "📅 The official OTT release date has not been announced."
+        )
+        return
     try:
         await show_movie(message, query)
     except httpx.HTTPStatusError as exc:
