@@ -113,7 +113,7 @@ async def show_movie(message, query, group_check=False):
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("🎬 Search in @Samp_yu5bot", url=movie_link(details["title"]))
     ]])
-    caption = "\\n".join(lines)
+    caption = "\n".join(lines)
     poster = details.get("poster")
     if poster:
         await message.reply_photo(
