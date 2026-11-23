@@ -739,7 +739,7 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ):
             user_error = (
                 "Google Gemini server ಈಗ ತಾತ್ಕಾಲಿಕವಾಗಿ busy ಇದೆ. "
-                "Bot 3 ಬಾರಿ retry ಮಾಡಿದೆ; ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+                "Primary Gemini model ಮತ್ತು fallback model ಎರಡನ್ನೂ ಪ್ರಯತ್ನಿಸಿದೆ. Google server busy ಇದೆ; ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
             )
         else:
             user_error = "Gemini API ಸಂಪರ್ಕದಲ್ಲಿ ಸಮಸ್ಯೆಯಾಗಿದೆ. Render Logs ನೋಡಿ."
