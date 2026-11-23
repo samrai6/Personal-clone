@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import html
 import logging
@@ -23,6 +24,35 @@ MOVIE_BOT = "Samp_yu5bot"
 TMDB_BASE = "https://api.themoviedb.org/3"
 LANGUAGE = "en-US"
 COUNTRY = "IN"
+
+
+def auto_delete_delay(chat_type):
+    return 600 if chat_type == "private" else 60
+
+
+async def delete_later(bot, chat_id, message_id, delay):
+    await asyncio.sleep(delay)
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as exc:
+        log.info("Auto-delete skipped (%s)", type(exc).__name__)
+
+
+def schedule_auto_delete(message, bot):
+    delay = auto_delete_delay(message.chat.type)
+    asyncio.create_task(delete_later(bot, message.chat_id, message.message_id, delay))
+
+
+async def reply_text_auto(message, **kwargs):
+    sent = await reply_text_auto(message, **kwargs)
+    schedule_auto_delete(sent, message.get_bot())
+    return sent
+
+
+async def reply_photo_auto(message, **kwargs):
+    sent = await reply_photo_auto(message, **kwargs)
+    schedule_auto_delete(sent, message.get_bot())
+    return sent
 
 
 async def tmdb_get(path, params=None):
@@ -144,7 +174,7 @@ async def release_and_ott(kind, item_id):
 async def show_title_suggestions(message, query):
     matches = await find_matching_titles(query)
     if not matches:
-        await message.reply_text(
+        await reply_text_auto(message, 
             "ಹತ್ತಿರದ Movie / Web Series ಹೆಸರು ಸಿಗಲಿಲ್ಲ.\n"
             "No close matching titles found."
         )
@@ -153,7 +183,7 @@ async def show_title_suggestions(message, query):
         f"{index}. <code>{html.escape(name)}</code>"
         for index, name in enumerate(matches, start=1)
     )
-    await message.reply_text(
+    await reply_text_auto(message, 
         "<b>ನೀವು ಹುಡುಕುತ್ತಿರುವ Movie / Web Series ಇದರಲ್ಲಿ ಇರಬಹುದೇ?\n"
         "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\n"
         f"{suggestions}\n\n"
@@ -210,12 +240,12 @@ async def show_movie(message, query, group_check=False):
         caption = "<b>" + "\n".join(lines) + "</b>"
     poster = details.get("poster")
     if poster and len(caption) <= 1024:
-        await message.reply_photo(photo=f"https://image.tmdb.org/t/p/w500{poster}", caption=caption, parse_mode="HTML", reply_markup=keyboard)
+        await reply_photo_auto(message, photo=f"https://image.tmdb.org/t/p/w500{poster}", caption=caption, parse_mode="HTML", reply_markup=keyboard)
     elif poster:
-        await message.reply_photo(photo=f"https://image.tmdb.org/t/p/w500{poster}", reply_markup=keyboard)
-        await message.reply_text(caption, parse_mode="HTML", disable_web_page_preview=True)
+        await reply_photo_auto(message, photo=f"https://image.tmdb.org/t/p/w500{poster}", reply_markup=keyboard)
+        await reply_text_auto(message, caption, parse_mode="HTML", disable_web_page_preview=True)
     else:
-        await message.reply_text(caption, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
+        await reply_text_auto(message, caption, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -235,10 +265,10 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_movie(message, query)
     except httpx.HTTPStatusError as exc:
         log.warning("TMDB request failed with HTTP %s", exc.response.status_code)
-        await message.reply_text("TMDB search ಈಗ ಲಭ್ಯವಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ.")
+        await reply_text_auto(message, "TMDB search ಈಗ ಲಭ್ಯವಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ.")
     except Exception as exc:
         log.exception("Movie lookup failed")
-        await message.reply_text("ಕ್ಷಮಿಸಿ, Movie details ಹುಡುಕಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.")
+        await reply_text_auto(message, "ಕ್ಷಮಿಸಿ, Movie details ಹುಡುಕಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.")
 
 
 async def group_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -256,7 +286,8 @@ async def group_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def startup_notify(app):
     try:
-        await app.bot.send_message(chat_id=OWNER_ID, text="I'm.alive sir 🤓")
+        sent = await app.bot.send_message(chat_id=OWNER_ID, text="I'm.alive sir 🤓")
+        schedule_auto_delete(sent, app.bot)
         log.info("Startup notification sent to owner")
     except Exception as exc:
         log.warning("Startup notification failed (%s)", type(exc).__name__)
