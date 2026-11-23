@@ -4,12 +4,13 @@ import html
 import logging
 import os
 import re
+import random
 import sqlite3
 from pathlib import Path
 from difflib import SequenceMatcher
 
 import httpx
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ReactionTypeEmoji
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, ContextTypes, filters
 from dotenv import load_dotenv
 
@@ -18,10 +19,33 @@ logging.basicConfig(level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
+
+# Match Ironman's random message reaction behavior.
+REACTIONS = [
+    "🤝", "😇", "🤗", "😍", "👍", "🎅", "😐", "🥰", "🤩", "😱",
+    "🤣", "😘", "👏", "😛", "😈", "🎉", "⚡️", "🫡", "🤓", "😎",
+    "🏆", "🔥", "🤭", "🌚", "🆒", "👻", "😁",
+]
+
+
+async def react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    if not message:
+        return
+    try:
+        await context.bot.set_message_reaction(
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            reaction=[ReactionTypeEmoji(random.choice(REACTIONS))],
+            is_big=True,
+        )
+    except Exception as exc:
+        log.debug("Message reaction skipped (%s)", type(exc).__name__)
+
 TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = 1315244338
 # TMDB Read Access Token from Ironman poster plugin.
-TMDB_BEARER_TOKEN = base64.b64decode("ZXlKaGJHY2lPaUpJVXpJMU5pSjkuZXlKaGRXUWlPaUkyWkdVM1lUSXlaR1UxWWpFNVlURmpObVV5WkdVNVpXRXlNekUyWm1ReE1DSXNJbTVpWmlJNk1UYzBOVE15TWpRMk1pNDFNek1zSW5OMVlpSTZJalk0TURjNE1XUmxZelZqT0RBek5XWmlNRGhoTmpFeE5DSXNJbk5qYjNCbGN5STZXeUpoY0dsZmNtVmhaQ0pkTENKMlpYSnphVzl1SWpveGZRLnJNTUoyLVBCSXY4WTd5YnhQSUVwSWx6VEVYenV3cm05cnVLeEFVQ0FzYnc=").decode("utf-8")
+TMDB_BEARER_TOKEN = os.getenv("TMDB_BEARER_TOKEN", "").strip()
 MOVIE_BOT = "Samp_yu5bot"
 TMDB_BASE = "https://api.themoviedb.org/3"
 LANGUAGE = "en-US"
@@ -646,6 +670,9 @@ def main():
     if missing:
         raise SystemExit("Missing configuration: " + ", ".join(missing))
     app = ApplicationBuilder().token(TOKEN).post_init(startup_notify).build()
+    # React to incoming PM and group messages without interrupting existing handlers.
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, react_to_message), group=-2)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, react_to_message), group=-2)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("fs", fs_command))
     app.add_handler(CallbackQueryHandler(fs_callback, pattern=r"^fs:"))
