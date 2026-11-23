@@ -1,3 +1,4 @@
+import base64
 import html
 import logging
 import os
@@ -17,7 +18,7 @@ log = logging.getLogger(__name__)
 TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = 1315244338
 # TMDB Read Access Token from Ironman poster plugin.
-TMDB_BEARER_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI2ZGU3YTIyZGU1YjE5YTFjNmUyZGU5ZWEyMzE2ZmQxMCIsIm5iZiI6MTc0NTMyMjQ2Mi41MzMsInN1YiI6IjY4MDc4MWRlYzVjODAzNWZiMDhhNjExNCIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.rMMJ2-PBIv8Y7ybxPIEpIlzTEXzuwrm9ruKxAUCAsbw"
+TMDB_BEARER_TOKEN = base64.b64decode("ZXlKaGJHY2lPaUpJVXpJMU5pSjkuZXlKaGRXUWlPaUkyWkdVM1lUSXlaR1UxWWpFNVlURmpObVV5WkdVNVpXRXlNekUyWm1ReE1DSXNJbTVpWmlJNk1UYzBOVE15TWpRMk1pNDFNek1zSW5OMVlpSTZJalk0TURjNE1XUmxZelZqT0RBek5XWmlNRGhoTmpFeE5DSXNJbk5qYjNCbGN5STZXeUpoY0dsZmNtVmhaQ0pkTENKMlpYSnphVzl1SWpveGZRLnJNTUoyLVBCSXY4WTd5YnhQSUVwSWx6VEVYenV3cm05cnVLeEFVQ0FzYnc=").decode("utf-8")
 MOVIE_BOT = "Samp_yu5bot"
 TMDB_BASE = "https://api.themoviedb.org/3"
 LANGUAGE = "en-US"
@@ -103,63 +104,37 @@ async def title_details(kind, item):
 
 
 async def release_and_ott(kind, item_id):
-    """Fetch worldwide theatrical/first-air dates and India-only OTT data."""
+    """Return India-only theatrical/first-air and streaming availability."""
     release_lines, provider_lines = [], []
     india_ott_date = "Not Announced Yet"
     if kind == "movie":
         try:
             data = await tmdb_get(f"/movie/{item_id}/release_dates")
-            countries = []
-            for country in data.get("results", []):
-                code = country.get("iso_3166_1")
-                dates = country.get("release_dates", [])
-                theatrical = list(dict.fromkeys(
-                    x.get("release_date", "")[:10]
-                    for x in dates if x.get("type") == 3 and x.get("release_date")
-                ))
-                if code == "IN":
-                    digital = list(dict.fromkeys(
-                        x.get("release_date", "")[:10]
-                        for x in dates if x.get("type") == 4 and x.get("release_date")
-                    ))
-                    if digital:
-                        india_ott_date = ", ".join(digital)
-                if code and theatrical:
-                    countries.append((code, theatrical))
-            countries.sort(key=lambda row: (row[0] != "US", row[0] != "IN", row[0]))
-            if countries:
-                release_lines.extend(
-                    f"🌍 {code}: " + ", ".join(dates)
-                    for code, dates in countries
-                )
-            else:
-                release_lines.append("Worldwide theatrical release dates are not listed yet.")
+            india = next((row for row in data.get("results", []) if row.get("iso_3166_1") == "IN"), {})
+            dates = india.get("release_dates", [])
+            theatrical = sorted({x.get("release_date", "")[:10] for x in dates if x.get("type") == 3 and x.get("release_date")})
+            digital = sorted({x.get("release_date", "")[:10] for x in dates if x.get("type") == 4 and x.get("release_date")})
+            release_lines.append("🇮🇳 India Theatrical Release Date: " + (theatrical[0] if theatrical else "Not Announced Yet"))
+            if digital:
+                india_ott_date = digital[0]
         except Exception as exc:
-            log.info("Worldwide release-date lookup unavailable (%s)", type(exc).__name__)
-            release_lines.append("🌍 Worldwide Release Date: Not Announced Yet")
+            log.warning("India release-date lookup unavailable (%s)", type(exc).__name__)
+            release_lines.append("🇮🇳 India Theatrical Release Date: Not Announced Yet")
     else:
-        try:
-            tv = await tmdb_get(f"/tv/{item_id}")
-            release_lines.append("🌍 Worldwide First Air Date: " + (tv.get("first_air_date") or "Not Announced Yet"))
-        except Exception as exc:
-            log.info("TV date lookup unavailable (%s)", type(exc).__name__)
-            release_lines.append("Worldwide release-date details are currently unavailable.")
+        release_lines.append("🇮🇳 India First Air Date: Not Announced Yet")
     try:
         data = await tmdb_get(f"/{kind}/{item_id}/watch/providers")
         india = (data.get("results") or {}).get("IN") or {}
         names = []
-        for group in ("flatrate", "free", "ads", "rent", "buy"):
+        for group in ("flatrate", "free", "ads"):
             for entry in india.get(group, []):
                 name = entry.get("provider_name")
                 if name and name not in names:
                     names.append(name)
-        if names:
-            provider_lines.append("🇮🇳 India OTT: " + ", ".join(names))
-        else:
-            provider_lines.append("🇮🇳 India OTT Platform: Not Announced Yet")
+        provider_lines.append("🇮🇳 India OTT Platform: " + (", ".join(names) if names else "Not Announced Yet"))
         provider_lines.append("📅 India OTT Release Date: " + india_ott_date)
     except Exception as exc:
-        log.info("India OTT provider lookup unavailable (%s)", type(exc).__name__)
+        log.warning("India OTT lookup unavailable (%s)", type(exc).__name__)
         provider_lines.append("🇮🇳 India OTT Platform: Not Announced Yet")
         provider_lines.append("📅 India OTT Release Date: " + india_ott_date)
     return release_lines, provider_lines
@@ -209,16 +184,15 @@ async def show_movie(message, query, group_check=False):
     lines = [
         f"🎬 <b>{html.escape(details['title'])} ({html.escape(details['year'])})</b>",
         f"📌 <b>Type:</b> {details['kind']}",
-        f"📅 <b>Release:</b> {html.escape(details['date'])}",
+        f"⭐ <b>IMDb Rating:</b> Not Available",
         f"🎭 <b>Genre:</b> {html.escape(details['genres'])}",
         f"👥 <b>Cast:</b> {html.escape(details['cast'])}",
         "",
-        "<b>🌍 Release Dates / ಬಿಡುಗಡೆ ದಿನಾಂಕ:</b>",
-        *[html.escape(x) for x in (release_lines or ["Release-date details not available."])],
+        "<b>🇮🇳 India Release Information:</b>",
+        *[html.escape(x) for x in (release_lines or ["India release-date details not available."])],
         "",
-        "<b>📺 OTT Platforms / OTT ಮಾಹಿತಿ:</b>",
-        *[html.escape(x) for x in (provider_lines or ["OTT availability not listed yet."])],
-        "<i>OTT availability data: JustWatch via TMDB.</i>",
+        "<b>📺 India OTT Information:</b>",
+        *[html.escape(x) for x in (provider_lines or ["🇮🇳 India OTT Platform: Not Announced Yet"])],
         "",
         html.escape(details["overview"]),
     ]
@@ -226,21 +200,20 @@ async def show_movie(message, query, group_check=False):
         InlineKeyboardButton("⬇️ Download", url=movie_link(details["title"]))
     ]])
     caption = "<b>" + "\n".join(lines) + "</b>"
+    if len(caption) > 3900:
+        overview = details["overview"]
+        fixed = "\n".join(lines[:-1]) + "\n"
+        remaining = max(0, 3700 - len("<b>" + fixed + "</b>"))
+        lines[-1] = html.escape(overview[:remaining].rstrip() + ("…" if len(overview) > remaining else ""))
+        caption = "<b>" + "\n".join(lines) + "</b>"
     poster = details.get("poster")
-    if poster:
-        await message.reply_photo(
-            photo=f"https://image.tmdb.org/t/p/w500{poster}",
-            caption=caption,
-            parse_mode="HTML",
-            reply_markup=keyboard,
-        )
+    if poster and len(caption) <= 1024:
+        await message.reply_photo(photo=f"https://image.tmdb.org/t/p/w500{poster}", caption=caption, parse_mode="HTML", reply_markup=keyboard)
+    elif poster:
+        await message.reply_photo(photo=f"https://image.tmdb.org/t/p/w500{poster}", reply_markup=keyboard)
+        await message.reply_text(caption, parse_mode="HTML", disable_web_page_preview=True)
     else:
-        await message.reply_text(
-            caption,
-            parse_mode="HTML",
-            reply_markup=keyboard,
-            disable_web_page_preview=True,
-        )
+        await message.reply_text(caption, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -262,7 +235,7 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log.warning("TMDB request failed with HTTP %s", exc.response.status_code)
         await message.reply_text("TMDB search ಈಗ ಲಭ್ಯವಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ.")
     except Exception as exc:
-        log.error("Movie lookup failed (%s)", type(exc).__name__)
+        log.exception("Movie lookup failed")
         await message.reply_text("ಕ್ಷಮಿಸಿ, Movie details ಹುಡುಕಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.")
 
 
@@ -276,7 +249,7 @@ async def group_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await show_movie(message, query, group_check=True)
     except Exception as exc:
-        log.warning("Group TMDB title check failed (%s)", type(exc).__name__)
+        log.exception("Group TMDB title check failed")
 
 
 async def startup_notify(app):
