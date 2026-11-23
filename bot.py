@@ -671,8 +671,8 @@ def main():
         raise SystemExit("Missing configuration: " + ", ".join(missing))
     app = ApplicationBuilder().token(TOKEN).post_init(startup_notify).build()
     # React to incoming PM and group messages without interrupting existing handlers.
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, react_to_message), group=-2)
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, react_to_message), group=-2)
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("fs", fs_command))
     app.add_handler(CallbackQueryHandler(fs_callback, pattern=r"^fs:"))
