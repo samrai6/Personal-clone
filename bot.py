@@ -132,10 +132,12 @@ async def release_and_ott(kind, item_id):
                 if name and name not in names:
                     names.append(name)
         provider_lines.append("🇮🇳 India OTT Platform: " + (", ".join(names) if names else "Not Announced Yet"))
+        provider_lines.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + india_ott_date)
         provider_lines.append("📅 India OTT Release Date: " + india_ott_date)
     except Exception as exc:
         log.warning("India OTT lookup unavailable (%s)", type(exc).__name__)
         provider_lines.append("🇮🇳 India OTT Platform: Not Announced Yet")
+        provider_lines.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + india_ott_date)
         provider_lines.append("📅 India OTT Release Date: " + india_ott_date)
     return release_lines, provider_lines
 
