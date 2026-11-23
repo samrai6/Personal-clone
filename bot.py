@@ -102,6 +102,51 @@ async def title_details(kind, item):
     }
 
 
+async def release_and_ott(kind, item_id):
+    """Fetch regional theatrical/digital dates and JustWatch streaming providers."""
+    release_lines, provider_lines = [], []
+    if kind == "movie":
+        try:
+            data = await tmdb_get(f"/movie/{item_id}/release_dates")
+            for country in data.get("results", []):
+                code = country.get("iso_3166_1", "")
+                dates = country.get("release_dates", [])
+                theatrical = list(dict.fromkeys(x.get("release_date", "")[:10] for x in dates if x.get("type") == 3 and x.get("release_date")))
+                digital = list(dict.fromkeys(x.get("release_date", "")[:10] for x in dates if x.get("type") == 4 and x.get("release_date")))
+                if code == "IN" or theatrical or digital:
+                    label = "🇮🇳 India" if code == "IN" else code
+                    release_lines.append(f"{label} — 🎥 {', '.join(theatrical) or '—'} | 📺 {', '.join(digital) or '—'}")
+            release_lines = release_lines[:8]
+        except Exception as exc:
+            log.info("Movie release-date lookup unavailable (%s)", type(exc).__name__)
+    else:
+        try:
+            tv = await tmdb_get(f"/tv/{item_id}")
+            release_lines.append("📺 First air date: " + (tv.get("first_air_date") or "Not announced"))
+        except Exception as exc:
+            log.info("TV first-air lookup unavailable (%s)", type(exc).__name__)
+    try:
+        data = await tmdb_get(f"/{kind}/{item_id}/watch/providers")
+        regions = data.get("results", {})
+        ordered = ["IN"] + [code for code in regions if code != "IN"]
+        for code in ordered:
+            region = regions.get(code) or {}
+            names = []
+            for group in ("flatrate", "free", "ads", "rent", "buy"):
+                for entry in region.get(group, []):
+                    name = entry.get("provider_name")
+                    if name and name not in names:
+                        names.append(name)
+            if names:
+                label = "🇮🇳 India" if code == "IN" else code
+                provider_lines.append(f"{label}: {', '.join(names[:5])}")
+            if len(provider_lines) >= 8:
+                break
+    except Exception as exc:
+        log.info("OTT provider lookup unavailable (%s)", type(exc).__name__)
+    return release_lines, provider_lines
+
+
 async def show_title_suggestions(message, query):
     matches = await find_matching_titles(query)
     if not matches:
@@ -143,6 +188,7 @@ async def show_movie(message, query, group_check=False):
         return
 
     details = await title_details(kind, item)
+    release_lines, provider_lines = await release_and_ott(kind, item["id"])
     lines = [
         f"🎬 <b>{html.escape(details['title'])} ({html.escape(details['year'])})</b>",
         f"⭐ <b>Rating:</b> {html.escape(details['rating'])}",
@@ -150,6 +196,13 @@ async def show_movie(message, query, group_check=False):
         f"📅 <b>Release:</b> {html.escape(details['date'])}",
         f"🎭 <b>Genre:</b> {html.escape(details['genres'])}",
         f"👥 <b>Cast:</b> {html.escape(details['cast'])}",
+        "",
+        "<b>🌍 Release Dates / ಬಿಡುಗಡೆ ದಿನಾಂಕ:</b>",
+        *[html.escape(x) for x in (release_lines or ["Release-date details not available."])],
+        "",
+        "<b>📺 OTT Platforms / OTT ಮಾಹಿತಿ:</b>",
+        *[html.escape(x) for x in (provider_lines or ["OTT availability not listed yet."])],
+        "<i>OTT availability data: JustWatch via TMDB.</i>",
         "",
         html.escape(details["overview"]),
     ]
@@ -186,27 +239,6 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     query = message.text.strip()
     if len(query) < 2 or len(query) > 100:
-        return
-    normalized = " ".join(query.casefold().split())
-    if "varanasi" in normalized:
-        await message.reply_text(
-            "🎬 Varanasi (2027)\\n\\n"
-            "🎥 ಥಿಯೇಟರ್ ಬಿಡುಗಡೆ: 7 ಏಪ್ರಿಲ್ 2027 (ನಿಗದಿತ ದಿನಾಂಕ).\\n"
-            "❌ ಸಿನಿಮಾ ಇನ್ನೂ OTTನಲ್ಲಿ ಬಿಡುಗಡೆಯಾಗಿಲ್ಲ.\\n"
-            "📺 OTT ಬಿಡುಗಡೆ ದಿನಾಂಕ ಮತ್ತು ಪ್ಲಾಟ್‌ಫಾರ್ಮ್ ಇನ್ನೂ ಅಧಿಕೃತವಾಗಿ ಘೋಷಣೆಯಾಗಿಲ್ಲ.\\n\\n"
-            "🎥 Theatrical release: 7 April 2027 (scheduled).\\n"
-            "❌ The movie is not available on OTT yet.\\n"
-            "📺 No official OTT release date or platform has been announced."
-        )
-        return
-    if "ramayana" in normalized and "2026" in normalized:
-        await message.reply_text(
-            "🎬 Ramayana (2026)\n\n"
-            "❌ ಈ ಸಿನಿಮಾ ಇನ್ನೂ OTTನಲ್ಲಿ ಬಿಡುಗಡೆಯಾಗಿಲ್ಲ.\n"
-            "📺 OTT release date ಇನ್ನೂ ಅಧಿಕೃತವಾಗಿ ಘೋಷಣೆಯಾಗಿಲ್ಲ.\n\n"
-            "❌ This movie is not available on OTT yet.\n"
-            "📅 The official OTT release date has not been announced."
-        )
         return
     try:
         await show_movie(message, query)
