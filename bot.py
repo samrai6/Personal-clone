@@ -28,8 +28,10 @@ LANGUAGE = "en-US"
 
 COUNTRY = "IN"
 
-# Source-channel settings and reply routing are stored on Render's persistent disk.
-DATA_DIR = Path(os.getenv("DATA_DIR", "/var/data"))
+# Use PostgreSQL when DATABASE_URL is configured (recommended for Render).
+# SQLite remains available for local testing, but its data is not durable on Render Free.
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+DATA_DIR = Path(os.getenv("DATA_DIR", "."))
 try:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 except OSError:
@@ -37,10 +39,42 @@ except OSError:
 DB_PATH = DATA_DIR / "personal_clone.db"
 
 
+class DatabaseConnection:
+    def __init__(self, connection, postgres=False):
+        self.connection = connection
+        self.postgres = postgres
+
+    def execute(self, sql, params=()):
+        if self.postgres:
+            sql = sql.replace("?", "%s")
+        return self.connection.execute(sql, params)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            if exc_type:
+                self.connection.rollback()
+            else:
+                self.connection.commit()
+        finally:
+            self.connection.close()
+
+
 def db_connect():
-    conn = sqlite3.connect(DB_PATH)
+    if DATABASE_URL:
+        import psycopg
+        database_url = DATABASE_URL
+        if database_url.startswith("postgres://"):
+            database_url = "postgresql://" + database_url[len("postgres://"):]
+        raw = psycopg.connect(database_url)
+        conn = DatabaseConnection(raw, postgres=True)
+    else:
+        conn = DatabaseConnection(sqlite3.connect(DB_PATH))
+
     conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-    conn.execute("CREATE TABLE IF NOT EXISTS relay_map (source_message_id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS relay_map (source_message_id BIGINT PRIMARY KEY, user_id BIGINT NOT NULL)")
     return conn
 
 
