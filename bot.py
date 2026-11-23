@@ -3,7 +3,6 @@ import logging
 import os
 import re
 from difflib import SequenceMatcher
-from urllib.parse import quote_plus
 
 import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -39,10 +38,6 @@ def movie_link(title):
     return f"https://t.me/{MOVIE_BOT}?start=" + ("getfile-" + slug)[:64].strip("-")
 
 
-def imdb_link(title):
-    return "https://www.imdb.com/find/?q=" + quote_plus(title)
-
-
 async def find_title(query):
     """Search both movies and TV shows; prefer the strongest title match."""
     found = []
@@ -75,6 +70,7 @@ async def title_details(kind, item):
     imdb_id = details.get("imdb_id") or details.get("external_ids", {}).get("imdb_id")
     return {
         "title": title, "year": year, "date": date or "Not announced",
+        "poster": details.get("poster_path") or item.get("poster_path"),
         "overview": overview, "rating": f"{float(rating):.1f}/10 (TMDB)" if rating else "N/A",
         "genres": genres, "cast": cast, "imdb_id": imdb_id,
         "kind": "Movie" if kind == "movie" else "Web Series",
@@ -106,24 +102,34 @@ async def show_movie(message, query, group_check=False):
     details = await title_details(kind, item)
     lines = [
         f"🎬 <b>{html.escape(details['title'])} ({html.escape(details['year'])})</b>",
+        f"⭐ <b>Rating:</b> {html.escape(details['rating'])}",
         f"📌 <b>Type:</b> {details['kind']}",
         f"📅 <b>Release:</b> {html.escape(details['date'])}",
         f"🎭 <b>Genre:</b> {html.escape(details['genres'])}",
-        f"⭐ <b>Rating:</b> {html.escape(details['rating'])}",
         f"👥 <b>Cast:</b> {html.escape(details['cast'])}",
         "",
         html.escape(details["overview"]),
     ]
-    buttons = [
-        InlineKeyboardButton("🔎 IMDb Search", url=imdb_link(details["title"])),
-        InlineKeyboardButton("🎬 Search in @Samp_yu5bot", url=movie_link(details["title"])),
-    ]
-    await message.reply_text(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([buttons]),
-        disable_web_page_preview=True,
-    )
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🎬 Search in @Samp_yu5bot", url=movie_link(details["title"]))
+    ]])
+    caption = "\\n".join(lines)
+    poster = details.get("poster")
+    if poster:
+        await message.reply_photo(
+            photo=f"https://image.tmdb.org/t/p/w500{poster}",
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+    else:
+        await message.reply_text(
+            caption,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+            disable_web_page_preview=True,
+        )
+
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
