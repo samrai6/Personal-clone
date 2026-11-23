@@ -103,49 +103,46 @@ async def title_details(kind, item):
 
 
 async def release_and_ott(kind, item_id):
-    """Fetch regional theatrical/digital dates and JustWatch streaming providers."""
+    """Fetch India-only theatrical/digital dates and streaming providers."""
     release_lines, provider_lines = [], []
     if kind == "movie":
         try:
             data = await tmdb_get(f"/movie/{item_id}/release_dates")
-            for country in data.get("results", []):
-                code = country.get("iso_3166_1", "")
-                dates = country.get("release_dates", [])
+            india = next((country for country in data.get("results", []) if country.get("iso_3166_1") == "IN"), None)
+            if india:
+                dates = india.get("release_dates", [])
                 theatrical = list(dict.fromkeys(x.get("release_date", "")[:10] for x in dates if x.get("type") == 3 and x.get("release_date")))
                 digital = list(dict.fromkeys(x.get("release_date", "")[:10] for x in dates if x.get("type") == 4 and x.get("release_date")))
-                if code == "IN" or theatrical or digital:
-                    label = "🇮🇳 India" if code == "IN" else code
-                    release_lines.append(f"{label} — 🎥 {', '.join(theatrical) or '—'} | 📺 {', '.join(digital) or '—'}")
-            release_lines = release_lines[:8]
+                release_lines.append("🇮🇳 India — 🎥 Theatrical: " + (", ".join(theatrical) or "Not listed") + " | 📺 Digital: " + (", ".join(digital) or "Not listed"))
+            else:
+                release_lines.append("🇮🇳 India release-date details are not listed yet.")
         except Exception as exc:
-            log.info("Movie release-date lookup unavailable (%s)", type(exc).__name__)
+            log.info("India release-date lookup unavailable (%s)", type(exc).__name__)
+            release_lines.append("🇮🇳 India release-date details are currently unavailable.")
     else:
         try:
             tv = await tmdb_get(f"/tv/{item_id}")
-            release_lines.append("📺 First air date: " + (tv.get("first_air_date") or "Not announced"))
+            release_lines.append("🇮🇳 India — First air date: " + (tv.get("first_air_date") or "Not announced"))
         except Exception as exc:
-            log.info("TV first-air lookup unavailable (%s)", type(exc).__name__)
+            log.info("TV date lookup unavailable (%s)", type(exc).__name__)
+            release_lines.append("🇮🇳 India release-date details are currently unavailable.")
     try:
         data = await tmdb_get(f"/{kind}/{item_id}/watch/providers")
-        regions = data.get("results", {})
-        ordered = ["IN"] + [code for code in regions if code != "IN"]
-        for code in ordered:
-            region = regions.get(code) or {}
-            names = []
-            for group in ("flatrate", "free", "ads", "rent", "buy"):
-                for entry in region.get(group, []):
-                    name = entry.get("provider_name")
-                    if name and name not in names:
-                        names.append(name)
-            if names:
-                label = "🇮🇳 India" if code == "IN" else code
-                provider_lines.append(f"{label}: {', '.join(names[:5])}")
-            if len(provider_lines) >= 8:
-                break
+        india = (data.get("results") or {}).get("IN") or {}
+        names = []
+        for group in ("flatrate", "free", "ads", "rent", "buy"):
+            for entry in india.get(group, []):
+                name = entry.get("provider_name")
+                if name and name not in names:
+                    names.append(name)
+        if names:
+            provider_lines.append("🇮🇳 India OTT: " + ", ".join(names))
+        else:
+            provider_lines.append("🇮🇳 India OTT platforms are not listed yet.")
     except Exception as exc:
-        log.info("OTT provider lookup unavailable (%s)", type(exc).__name__)
+        log.info("India OTT provider lookup unavailable (%s)", type(exc).__name__)
+        provider_lines.append("🇮🇳 India OTT information is currently unavailable.")
     return release_lines, provider_lines
-
 
 async def show_title_suggestions(message, query):
     matches = await find_matching_titles(query)
