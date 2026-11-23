@@ -685,21 +685,21 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text("ಈ setting Owner ಮಾತ್ರ ಬದಲಾಯಿಸಬಹುದು.")
             return
         if action == "on":
-            if not os.getenv("GEMINI_API_KEY", "").strip():
+            if not os.getenv("OPENROUTER_API_KEY", "").strip():
                 await message.reply_text(
-                    "Gemini API key configure ಆಗಿಲ್ಲ. Render-ನಲ್ಲಿ GEMINI_API_KEY secret ಸೇರಿಸಿ."
+                    "OpenRouter API key configure ಆಗಿಲ್ಲ. Render-ನಲ್ಲಿ OPENROUTER_API_KEY secret ಸೇರಿಸಿ."
                 )
                 return
             set_ai_enabled(True)
-            await message.reply_text("✅ Gemini AI ON ಆಯಿತು. ಇದು restart ಆದರೂ ON ಆಗಿಯೇ ಇರುತ್ತದೆ.")
+            await message.reply_text("✅ OpenRouter AI ON ಆಯಿತು. ಇದು restart ಆದರೂ ON ಆಗಿಯೇ ಇರುತ್ತದೆ.")
         else:
             set_ai_enabled(False)
-            await message.reply_text("⛔ Gemini AI OFF ಆಯಿತು.")
+            await message.reply_text("⛔ OpenRouter AI OFF ಆಯಿತು.")
         return
 
     if action == "status":
         state = "ON" if is_ai_enabled() else "OFF"
-        await message.reply_text(f"Gemini AI Status: {state}")
+        await message.reply_text(f"OpenRouter AI Status: {state}")
         return
 
     if not args:
@@ -710,7 +710,7 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not is_ai_enabled():
-        await message.reply_text("Gemini AI ಈಗ OFF ಇದೆ.")
+        await message.reply_text("OpenRouter AI ಈಗ OFF ಇದೆ.")
         return
 
     prompt = " ".join(args).strip()
@@ -720,20 +720,20 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status = await message.reply_text("🤖 ಉತ್ತರ ಸಿದ್ಧಪಡಿಸಲಾಗುತ್ತಿದೆ...")
     try:
-        from gemini_ai import generate_answer
+        from openrouter_ai import generate_answer
         answer = await generate_answer(prompt)
         await status.edit_text((answer or "ಕ್ಷಮಿಸಿ, ಉತ್ತರ ಸಿಗಲಿಲ್ಲ.")[:3900])
     except Exception as exc:
-        error_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+        error_code = getattr(exc, "code", None) or getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
         error_text = str(exc).lower()
-        log.exception("Gemini request failed (code=%s)", error_code)
+        log.exception("OpenRouter request failed (code=%s)", error_code)
 
         if error_code == 429 or "quota" in error_text or "resource_exhausted" in error_text:
-            user_error = "Gemini Free quota ಮುಗಿದಿದೆ. Quota reset ಆದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+            user_error = "OpenRouter Free request limit ಅಥವಾ model quota ತಲುಪಿದೆ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
         elif error_code in (401, 403) or "api key" in error_text or "permission_denied" in error_text:
-            user_error = "Gemini API key ತಪ್ಪಾಗಿದೆ ಅಥವಾ API access ಇಲ್ಲ. Render‌ನ GEMINI_API_KEY ಪರಿಶೀಲಿಸಿ."
+            user_error = "OpenRouter API key ತಪ್ಪಾಗಿದೆ ಅಥವಾ API access ಇಲ್ಲ. Render‌ನ OPENROUTER_API_KEY ಪರಿಶೀಲಿಸಿ."
         elif error_code == 404 or "not_found" in error_text:
-            user_error = "Gemini model ಲಭ್ಯವಿಲ್ಲ. Model ಹೆಸರು/API access ಪರಿಶೀಲಿಸಬೇಕು."
+            user_error = "OpenRouter Free model ಲಭ್ಯವಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
         elif error_code in (408, 500, 502, 503, 504) or any(
             term in error_text for term in ("unavailable", "overloaded", "timeout")
         ):
@@ -742,7 +742,7 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Primary Gemini model ಮತ್ತು fallback model ಎರಡನ್ನೂ ಪ್ರಯತ್ನಿಸಿದೆ. Google server busy ಇದೆ; ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
             )
         else:
-            user_error = "Gemini API ಸಂಪರ್ಕದಲ್ಲಿ ಸಮಸ್ಯೆಯಾಗಿದೆ. Render Logs ನೋಡಿ."
+            user_error = "OpenRouter API ಸಂಪರ್ಕದಲ್ಲಿ ಸಮಸ್ಯೆಯಾಗಿದೆ. Render Logs ನೋಡಿ."
         await status.edit_text(user_error)
 
 
