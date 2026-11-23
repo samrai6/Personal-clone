@@ -45,12 +45,22 @@ async def react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = 1315244338
 # TMDB Read Access Token from Ironman poster plugin.
-TMDB_BEARER_TOKEN = base64.b64decode("ZXlKaGJHY2lPaUpJVXpJMU5pSjkuZXlKaGRXUWlPaUkyWkdVM1lUSXlaR1UxWWpFNVlURmpObVV5WkdVNVpXRXlNekUyWm1ReE1DSXNJbTVpWmlJNk1UYzBOVE15TWpRMk1pNDFNek1zSW5OMVlpSTZJalk0TURjNE1XUmxZelZqT0RBek5XWmlNRGhoTmpFeE5DSXNJbk5qYjNCbGN5STZXeUpoY0dsZmNtVmhaQ0pkTENKMlpYSnphVzl1SWpveGZRLnJNTUoyLVBCSXY4WTd5YnhQSUVwSWx6VEVYenV3cm05cnVLeEFVQ0FzYnc=").decode("utf-8")
+TMDB_BEARER_TOKEN = os.getenv("TMDB_BEARER_TOKEN", "").strip()
 MOVIE_BOT = "Samp_yu5bot"
 TMDB_BASE = "https://api.themoviedb.org/3"
 LANGUAGE = "en-US"
 
 COUNTRY = "IN"
+
+
+def format_tmdb_date(value):
+    """Format TMDb ISO dates as DD-MM-YYYY."""
+    if not value:
+        return "Not Announced Yet"
+    try:
+        return datetime.strptime(value[:10], "%Y-%m-%d").strftime("%d-%m-%Y")
+    except (TypeError, ValueError):
+        return value
 
 # Use PostgreSQL when DATABASE_URL is configured (recommended for Render).
 # SQLite remains available for local testing, but its data is not durable on Render Free.
@@ -324,8 +334,10 @@ async def title_details(kind, item):
     return {
         "title": title, "year": year, "date": date or "Not announced",
         "poster": details.get("poster_path") or item.get("poster_path"),
-        "overview": overview, "rating": f"{float(rating):.1f}/10 (TMDB)" if rating else "N/A",
-        "genres": genres, "cast": cast, "imdb_id": imdb_id,
+        "overview": overview, "rating": f"{float(rating):.1f}/10" if rating is not None else "N/A",
+        "genres": genres, "cast": cast,
+        "languages": ", ".join(lang.get("english_name") or lang.get("name", "") for lang in details.get("spoken_languages", []) if lang.get("english_name") or lang.get("name")) or "Not Available",
+        "imdb_id": imdb_id,
         "kind": "Movie" if kind == "movie" else "Web Series",
     }
 
@@ -341,7 +353,7 @@ async def release_and_ott(kind, item_id):
             dates = india.get("release_dates", [])
             theatrical = sorted({x.get("release_date", "")[:10] for x in dates if x.get("type") == 3 and x.get("release_date")})
             digital = sorted({x.get("release_date", "")[:10] for x in dates if x.get("type") == 4 and x.get("release_date")})
-            release_lines.append("🇮🇳 India Theatrical Release Date: " + (theatrical[0] if theatrical else "Not Announced Yet"))
+            release_lines.append("India Theatrical Release Date: " + (format_tmdb_date(theatrical[0]) if theatrical else "Not Announced Yet"))
             if digital:
                 india_ott_date = digital[0]
         except Exception as exc:
@@ -358,14 +370,16 @@ async def release_and_ott(kind, item_id):
                 name = entry.get("provider_name")
                 if name and name not in names:
                     names.append(name)
-        provider_lines.append("🇮🇳 India OTT Platform: " + (", ".join(names) if names else "Not Announced Yet"))
-        provider_lines.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + india_ott_date)
-        provider_lines.append("📅 India OTT Release Date: " + india_ott_date)
+        provider_lines.append("India OTT Platform: " + (", ".join(names) if names else "Not Announced Yet"))
+        display_ott_date = format_tmdb_date(india_ott_date) if india_ott_date != "Not Announced Yet" else "ಬಂದಿಲ್ಲ"
+        provider_lines.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + display_ott_date)
+        provider_lines.append("India OTT Release Date: " + (format_tmdb_date(india_ott_date) if india_ott_date != "Not Announced Yet" else "Not Announced Yet"))
     except Exception as exc:
         log.warning("India OTT lookup unavailable (%s)", type(exc).__name__)
-        provider_lines.append("🇮🇳 India OTT Platform: Not Announced Yet")
-        provider_lines.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + india_ott_date)
-        provider_lines.append("📅 India OTT Release Date: " + india_ott_date)
+        provider_lines.append("India OTT Platform: Not Announced Yet")
+        display_ott_date = format_tmdb_date(india_ott_date) if india_ott_date != "Not Announced Yet" else "ಬಂದಿಲ್ಲ"
+        provider_lines.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + display_ott_date)
+        provider_lines.append("India OTT Release Date: " + (format_tmdb_date(india_ott_date) if india_ott_date != "Not Announced Yet" else "Not Announced Yet"))
     return release_lines, provider_lines
 
 async def show_title_suggestions(message, query):
@@ -412,11 +426,10 @@ async def show_movie(message, query, group_check=False):
     lines = [
         f"🎬 <b>{html.escape(details['title'])} ({html.escape(details['year'])})</b>",
         f"📌 <b>Type:</b> {details['kind']}",
-        f"⭐ <b>IMDb Rating:</b> Not Available",
+        f"⭐ <b>TMDb Rating:</b> {html.escape(details['rating'])}",
         f"🎭 <b>Genre:</b> {html.escape(details['genres'])}",
+        f"🌐 Available Languages: {html.escape(details['languages'])}",
         f"👥 <b>Cast:</b> {html.escape(details['cast'])}",
-        "",
-        "<b>🇮🇳 India Release Information:</b>",
         *[html.escape(x) for x in (release_lines or ["India release-date details not available."])],
         "",
         "<b>📺 India OTT Information:</b>",
