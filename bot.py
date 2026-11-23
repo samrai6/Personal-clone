@@ -496,8 +496,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         if title:
-            sent = await context.bot.send_message(chat_id=message.chat_id, text=title)
-            schedule_auto_delete(sent, context.bot)
+            await context.bot.send_message(chat_id=message.chat_id, text=title)
         return
     await reply_text_auto(
         message,
