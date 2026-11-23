@@ -433,6 +433,33 @@ async def source_channel_reply(update: Update, context: ContextTypes.DEFAULT_TYP
         log.warning("Could not deliver source-channel reply (%s)", type(exc).__name__)
 
 
+async def source_discussion_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    source_id = get_source_channel()
+    if not message or not source_id or not message.reply_to_message:
+        return
+    if not message.from_user or message.from_user.id != OWNER_ID:
+        return
+    original = message.reply_to_message
+    origin = original.forward_origin
+    origin_chat = getattr(origin, "chat", None) if origin else None
+    origin_message_id = getattr(origin, "message_id", None) if origin_chat and origin_chat.id == source_id else None
+    if not origin_message_id:
+        return
+    user_id = get_relay_user(origin_message_id)
+    if not user_id:
+        return
+    try:
+        copied = await context.bot.copy_message(
+            chat_id=user_id,
+            from_chat_id=message.chat_id,
+            message_id=message.message_id,
+        )
+        asyncio.create_task(delete_later(context.bot, user_id, copied.message_id, 600))
+    except Exception as exc:
+        log.warning("Discussion reply delivery failed (%s)", type(exc).__name__)
+
+
 async def private_non_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     if not message or update.effective_user.id != message.from_user.id:
@@ -537,6 +564,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.FORWARDED, accept_source_forward), group=-1)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, private_reply))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.TEXT & ~filters.COMMAND, private_non_text))
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.REPLY, source_discussion_reply), group=-1)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, source_channel_reply))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
