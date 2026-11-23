@@ -105,6 +105,7 @@ async def title_details(kind, item):
 async def release_and_ott(kind, item_id):
     """Fetch worldwide theatrical/first-air dates and India-only OTT data."""
     release_lines, provider_lines = [], []
+    india_ott_date = "Not Announced Yet"
     if kind == "movie":
         try:
             data = await tmdb_get(f"/movie/{item_id}/release_dates")
@@ -116,6 +117,13 @@ async def release_and_ott(kind, item_id):
                     x.get("release_date", "")[:10]
                     for x in dates if x.get("type") == 3 and x.get("release_date")
                 ))
+                if code == "IN":
+                    digital = list(dict.fromkeys(
+                        x.get("release_date", "")[:10]
+                        for x in dates if x.get("type") == 4 and x.get("release_date")
+                    ))
+                    if digital:
+                        india_ott_date = ", ".join(digital)
                 if code and theatrical:
                     countries.append((code, theatrical))
             countries.sort(key=lambda row: (row[0] != "US", row[0] != "IN", row[0]))
@@ -128,11 +136,11 @@ async def release_and_ott(kind, item_id):
                 release_lines.append("Worldwide theatrical release dates are not listed yet.")
         except Exception as exc:
             log.info("Worldwide release-date lookup unavailable (%s)", type(exc).__name__)
-            release_lines.append("Worldwide release-date details are currently unavailable.")
+            release_lines.append("🌍 Worldwide Release Date: Not Announced Yet")
     else:
         try:
             tv = await tmdb_get(f"/tv/{item_id}")
-            release_lines.append("🌍 Worldwide first air date: " + (tv.get("first_air_date") or "Not announced"))
+            release_lines.append("🌍 Worldwide First Air Date: " + (tv.get("first_air_date") or "Not Announced Yet"))
         except Exception as exc:
             log.info("TV date lookup unavailable (%s)", type(exc).__name__)
             release_lines.append("Worldwide release-date details are currently unavailable.")
@@ -148,10 +156,12 @@ async def release_and_ott(kind, item_id):
         if names:
             provider_lines.append("🇮🇳 India OTT: " + ", ".join(names))
         else:
-            provider_lines.append("🇮🇳 India OTT platforms are not listed yet.")
+            provider_lines.append("🇮🇳 India OTT Platform: Not Announced Yet")
+        provider_lines.append("📅 India OTT Release Date: " + india_ott_date)
     except Exception as exc:
         log.info("India OTT provider lookup unavailable (%s)", type(exc).__name__)
-        provider_lines.append("🇮🇳 India OTT information is currently unavailable.")
+        provider_lines.append("🇮🇳 India OTT Platform: Not Announced Yet")
+        provider_lines.append("📅 India OTT Release Date: " + india_ott_date)
     return release_lines, provider_lines
 
 async def show_title_suggestions(message, query):
