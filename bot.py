@@ -15,6 +15,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, Reactio
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, ContextTypes, filters
 from dotenv import load_dotenv
 
+AI_CHAT_ENABLED = os.getenv("AI_CHAT_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -752,6 +755,9 @@ def main():
     # React to incoming PM and group messages without interrupting existing handlers.
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
+    if AI_CHAT_ENABLED and GEMINI_API_KEY:
+        from gemini_ai import ai_command
+        app.add_handler(CommandHandler("ai", ai_command))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("fs", fs_command))
     app.add_handler(CallbackQueryHandler(fs_callback, pattern=r"^fs:"))
