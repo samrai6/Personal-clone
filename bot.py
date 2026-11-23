@@ -74,7 +74,8 @@ async def find_matching_titles(query):
             matches.append((ratio, float(item.get("popularity") or 0), name))
     matches.sort(key=lambda row: (row[0], row[1]), reverse=True)
     # Limit suggestions to the five closest matches.
-    if not matches or matches[0][0] < 0.30:
+    # Ignore weak matches so unrelated titles are never suggested.
+    if not matches or matches[0][0] < 0.45:
         return []
     return [name for _, _, name in matches[:5]]
 
@@ -101,30 +102,46 @@ async def title_details(kind, item):
     }
 
 
+async def show_title_suggestions(message, query):
+    matches = await find_matching_titles(query)
+    if not matches:
+        await message.reply_text(
+            "ಹತ್ತಿರದ Movie / Web Series ಹೆಸರು ಸಿಗಲಿಲ್ಲ.\\n"
+            "No close matching titles found."
+        )
+        return
+    suggestions = "\\n".join(
+        f"{index}. <code>{html.escape(name)}</code>"
+        for index, name in enumerate(matches, start=1)
+    )
+    await message.reply_text(
+        "<b>ನಿಮ್ಮ ಮೂವೀ / ವೆಬ್ ಸೀರೀಸ್ ಹೆಸರಿನ ಸ್ಪೆಲ್ಲಿಂಗ್ ತಪ್ಪಾಗಿದೆ.\\n"
+        "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\\n"
+        f"{suggestions}\\n\\n"
+        "<b>Your Movie / Web Series title spelling is incorrect.\\n"
+        "Matching titles:</b>\\n"
+        f"{suggestions}",
+        parse_mode="HTML",
+        reply_to_message_id=message.message_id,
+    )
+
+
 async def show_movie(message, query, group_check=False):
     if group_check:
-        matches = await find_matching_titles(query)
-        if not matches:
-            return
-        suggestions = "\n".join(f"• <code>{html.escape(name)}</code>" for name in matches)
-        await message.reply_text(
-            "<b>ನಿಮ್ಮ ಮೂವೀ / ವೆಬ್ ಸೀರೀಸ್ ಹೆಸರಿನ ಸ್ಪೆಲ್ಲಿಂಗ್ ತಪ್ಪಾಗಿದೆ.\n"
-            "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು (ಗರಿಷ್ಠ 5):</b>\n"
-            f"{suggestions}\n\n"
-            "<b>Your Movie / Web Series title spelling is incorrect.\n"
-            "Matching titles (up to 5):</b>\n"
-            f"{suggestions}",
-            parse_mode="HTML",
-            reply_to_message_id=message.message_id,
-        )
+        await show_title_suggestions(message, query)
         return
 
     result = await find_title(query)
     if not result:
-        await message.reply_text("TMDBನಲ್ಲಿ ಈ Movie / Web Series ಸಿಗಲಿಲ್ಲ. Title spelling ಪರಿಶೀಲಿಸಿ.")
+        await show_title_suggestions(message, query)
         return
 
     kind, item, similarity = result
+    # In private chat, treat weak title matches as spelling mistakes too.
+    if similarity < 0.65:
+        await show_title_suggestions(message, query)
+        return
+
     details = await title_details(kind, item)
     lines = [
         f"🎬 <b>{html.escape(details['title'])} ({html.escape(details['year'])})</b>",
@@ -139,7 +156,7 @@ async def show_movie(message, query, group_check=False):
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("⬇️ Download", url=movie_link(details["title"]))
     ]])
-    caption = "\n".join(lines)
+    caption = "\\n".join(lines)
     poster = details.get("poster")
     if poster:
         await message.reply_photo(
