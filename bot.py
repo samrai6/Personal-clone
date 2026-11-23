@@ -730,6 +730,8 @@ def main():
     missing = []
     if not TOKEN:
         missing.append("BOT_TOKEN")
+    if not MONGODB_URI:
+        missing.append("MONGODB_URI")
     if missing:
         raise SystemExit("Missing configuration: " + ", ".join(missing))
     app = ApplicationBuilder().token(TOKEN).post_init(startup_notify).build()
