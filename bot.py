@@ -249,11 +249,7 @@ async def release_and_ott(kind, item_id):
 async def show_title_suggestions(message, query):
     matches = await find_matching_titles(query)
     if not matches:
-        await reply_text_auto(message, 
-            "ಹತ್ತಿರದ Movie / Web Series ಹೆಸರು ಸಿಗಲಿಲ್ಲ.\n"
-            "No close matching titles found."
-        )
-        return
+        return False
     suggestions = "\n".join(
         f"{index}. <code>{html.escape(name)}</code>"
         for index, name in enumerate(matches, start=1)
@@ -320,6 +316,7 @@ async def show_movie(message, query, group_check=False):
         await reply_text_auto(message, caption, parse_mode="HTML", disable_web_page_preview=True)
     else:
         await reply_text_auto(message, caption, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
+    return True
     return True
 
 
