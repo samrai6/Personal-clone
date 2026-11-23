@@ -9,13 +9,16 @@ from quota import DailyQuota
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
+# HTTPX logs full request URLs; Telegram URLs contain the bot token.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN", "")
 MONGO_URI = os.getenv("MONGODB_URI", "")
 DB_NAME = os.getenv("MONGODB_NAME", "personal_clone")
 API_KEY = os.getenv("GEMINI_API_KEY", "")
-MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 MOVIE_BOT = os.getenv("MOVIE_BOT_USERNAME", "Samp_yu5bot").lstrip("@")
 ADMINS = {int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()}
 mongo = None
@@ -138,9 +141,15 @@ Return JSON only. Do not use markdown fences.
                 InlineKeyboardButton("🎬 Search in @" + MOVIE_BOT, url=movie_link(title, search_term))
             ]])
         await status.edit_text(answer, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
-    except Exception:
-        log.exception("PM handler failed")
-        await status.edit_text("ಕ್ಷಮಿಸಿ, ಈಗ ತಾಂತ್ರಿಕ ಸಮಸ್ಯೆ ಇದೆ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ.")
+    except Exception as exc:
+        # Avoid dumping request URLs, credentials, or long provider traces into Render logs.
+        if getattr(exc, "status_code", None) == 429 or "RESOURCE_EXHAUSTED" in str(exc):
+            log.warning("Gemini quota/rate limit reached (HTTP 429).")
+            message = "Gemini API ಉಚಿತ ಬಳಕೆಯ ಮಿತಿ ಮುಗಿದಿದೆ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ."
+        else:
+            log.error("PM handler failed (%s).", type(exc).__name__)
+            message = "ಕ್ಷಮಿಸಿ, ಈಗ ತಾಂತ್ರಿಕ ಸಮಸ್ಯೆ ಇದೆ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ."
+        await status.edit_text(message)
 
 
 async def group_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,8 +177,11 @@ Only set confidence >= 0.90 if verified. Never guess.
             "ನಿಮ್ಮ ಮೂವೀ ಸ್ಪೆಲ್ಲಿಂಗ್ ತಪ್ಪಾಗಿದೆ\nYour movie spelling is wrong\n\nCorrect spelling: " + correct,
             reply_to_message_id=msg.message_id,
         )
-    except Exception:
-        log.exception("Group spelling check failed")
+    except Exception as exc:
+        if getattr(exc, "status_code", None) == 429 or "RESOURCE_EXHAUSTED" in str(exc):
+            log.warning("Gemini quota/rate limit reached during group check (HTTP 429).")
+        else:
+            log.warning("Group spelling check failed (%s).", type(exc).__name__)
 
 
 async def post_init(app):
