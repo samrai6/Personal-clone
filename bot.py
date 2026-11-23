@@ -320,6 +320,7 @@ async def show_movie(message, query, group_check=False):
         await reply_text_auto(message, caption, parse_mode="HTML", disable_web_page_preview=True)
     else:
         await reply_text_auto(message, caption, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
+    return True
 
 
 
