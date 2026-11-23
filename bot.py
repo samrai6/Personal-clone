@@ -1,210 +1,176 @@
-import html, json, logging, os, re
-from google import genai
-from google.genai import types
-from motor.motor_asyncio import AsyncIOMotorClient
+import html
+import logging
+import os
+import re
+from difflib import SequenceMatcher
+from urllib.parse import quote_plus
+
+import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from dotenv import load_dotenv
-from quota import DailyQuota
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
-# HTTPX logs full request URLs; Telegram URLs contain the bot token.
 logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN", "")
-MONGO_URI = os.getenv("MONGODB_URI", "")
-DB_NAME = os.getenv("MONGODB_NAME", "personal_clone")
-API_KEY = os.getenv("GEMINI_API_KEY", "")
-MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
-MOVIE_BOT = os.getenv("MOVIE_BOT_USERNAME", "Samp_yu5bot").lstrip("@")
-ADMINS = {int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()}
-mongo = None
-quota = None
-ai = None
+# Set TMDB_API_KEY in Render. Do not commit a real key to this public repository.
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", "PASTE_TMDB_API_KEY_HERE")
+MOVIE_BOT = "Samp_yu5bot"
+TMDB_BASE = "https://api.themoviedb.org/3"
+LANGUAGE = "en-US"
+COUNTRY = "IN"
 
 
-def parse_json(text):
-    text = re.sub(r"^\s*```(?:json)?|\```\s*$", "", (text or "").strip(), flags=re.I)
-    try:
-        return json.loads(text)
-    except Exception:
-        match = re.search(r"\{.*\}", text, re.S)
-        if match:
-            try:
-                return json.loads(match.group())
-            except Exception:
-                pass
-    return None
+async def tmdb_get(path, params=None):
+    query = dict(params or {})
+    query["api_key"] = TMDB_API_KEY
+    query.setdefault("language", LANGUAGE)
+    async with httpx.AsyncClient(timeout=15) as client:
+        response = await client.get(TMDB_BASE + path, params=query)
+        response.raise_for_status()
+        return response.json()
 
 
-async def gemini(prompt, use_search=False):
-    config = None
-    if use_search:
-        config = types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())]
+def movie_link(title):
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", title.strip()).strip("-") or "movie"
+    return f"https://t.me/{MOVIE_BOT}?start=" + ("getfile-" + slug)[:64].strip("-")
+
+
+def imdb_link(title):
+    return "https://www.imdb.com/find/?q=" + quote_plus(title)
+
+
+async def find_title(query):
+    """Search both movies and TV shows; prefer the strongest title match."""
+    found = []
+    for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
+        data = await tmdb_get(endpoint, {"query": query, "include_adult": "false", "page": 1})
+        for item in data.get("results", [])[:5]:
+            name = item.get("title") if kind == "movie" else item.get("name")
+            if not name:
+                continue
+            ratio = SequenceMatcher(None, query.casefold(), name.casefold()).ratio()
+            found.append((ratio, kind, item))
+    if not found:
+        return None
+    found.sort(key=lambda row: (row[0], float(row[2].get("popularity") or 0)), reverse=True)
+    return found[0][1], found[0][2], found[0][0]
+
+
+async def title_details(kind, item):
+    item_id = item["id"]
+    append = "credits,external_ids"
+    details = await tmdb_get(f"/{kind}/{item_id}", {"append_to_response": append})
+    title = details.get("title") if kind == "movie" else details.get("name")
+    title = title or (item.get("title") if kind == "movie" else item.get("name")) or "Unknown"
+    date = details.get("release_date") if kind == "movie" else details.get("first_air_date")
+    year = date[:4] if date else "N/A"
+    overview = details.get("overview") or "Synopsis not available."
+    rating = details.get("vote_average")
+    genres = ", ".join(g.get("name", "") for g in details.get("genres", []) if g.get("name")) or "N/A"
+    cast = ", ".join(p.get("name", "") for p in details.get("credits", {}).get("cast", [])[:5] if p.get("name")) or "N/A"
+    imdb_id = details.get("imdb_id") or details.get("external_ids", {}).get("imdb_id")
+    return {
+        "title": title, "year": year, "date": date or "Not announced",
+        "overview": overview, "rating": f"{float(rating):.1f}/10 (TMDB)" if rating else "N/A",
+        "genres": genres, "cast": cast, "imdb_id": imdb_id,
+        "kind": "Movie" if kind == "movie" else "Web Series",
+    }
+
+
+async def show_movie(message, query, group_check=False):
+    result = await find_title(query)
+    if not result:
+        if not group_check:
+            await message.reply_text("TMDBನಲ್ಲಿ ಈ Movie / Web Series ಸಿಗಲಿಲ್ಲ. Title spelling ಪರಿಶೀಲಿಸಿ.")
+        return
+
+    kind, item, similarity = result
+    canonical = item.get("title") if kind == "movie" else item.get("name")
+    if not canonical:
+        return
+
+    # In groups, only reply when TMDB suggests a likely spelling correction.
+    if group_check:
+        if canonical.casefold() == query.casefold() or similarity < 0.72:
+            return
+        await message.reply_text(
+            "ನಿಮ್ಮ ಮೂವೀ ಸ್ಪೆಲ್ಲಿಂಗ್ ತಪ್ಪಾಗಿದೆ\nYour movie spelling is wrong\n\nCorrect spelling: " + canonical,
+            reply_to_message_id=message.message_id,
         )
-    result = await ai.aio.models.generate_content(
-        model=MODEL, contents=prompt, config=config
-    )
-    return result.text or ""
+        return
 
-
-def movie_link(title, search_term=None):
-    # The linked movie bot expects the getfile-<title> start parameter.
-    term = str(search_term or title).strip()
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", term).strip("-")
-    if not slug:
-        slug = "movie"
-    payload = ("getfile-" + slug)[:64].strip("-")
-    return "https://t.me/" + MOVIE_BOT + "?start=" + payload
-
-
-def needs_movie_search(text):
-    value = text.casefold()
-    keywords = [
-        "movie", "film", "ott", "release", "cast", "rating", "story",
-        "web series", "cinema", "ಮೂವಿ", "ಸಿನಿಮಾ", "ಬಿಡುಗಡೆ", "ನಟ",
-        "ನಟಿ", "ಕಥೆ", "ಯಾವಾಗ", "ಮಾಹಿತಿ", "ಒಟಿಟಿ"
+    details = await title_details(kind, item)
+    lines = [
+        f"🎬 <b>{html.escape(details['title'])} ({html.escape(details['year'])})</b>",
+        f"📌 <b>Type:</b> {details['kind']}",
+        f"📅 <b>Release:</b> {html.escape(details['date'])}",
+        f"🎭 <b>Genre:</b> {html.escape(details['genres'])}",
+        f"⭐ <b>Rating:</b> {html.escape(details['rating'])}",
+        f"👥 <b>Cast:</b> {html.escape(details['cast'])}",
+        "",
+        html.escape(details["overview"]),
     ]
-    if any(word in value for word in keywords):
-        return True
-    casual = ("hi", "hello", "hey", "how are you", "who are you", "thanks", "thank you")
-    if value in casual or "?" in value:
-        return False
-    # Short standalone phrases are commonly movie titles.
-    return len(value.split()) <= 6
+    buttons = [
+        InlineKeyboardButton("🔎 IMDb Search", url=imdb_link(details["title"])),
+        InlineKeyboardButton("🎬 Search in @Samp_yu5bot", url=movie_link(details["title"])),
+    ]
+    await message.reply_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([buttons]),
+        disable_web_page_preview=True,
+    )
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "ನಮಸ್ಕಾರ! ಕನ್ನಡ ಅಥವಾ Englishನಲ್ಲಿ message ಮಾಡಿ. Movies, Web Series ಮತ್ತು ಸಾಮಾನ್ಯ ಪ್ರಶ್ನೆಗಳಿಗೆ ಸಹಾಯ ಮಾಡುತ್ತೇನೆ."
+    await update.effective_message.reply_text(
+        "ನಮಸ್ಕಾರ! Movie ಅಥವಾ Web Series ಹೆಸರು ಕಳುಹಿಸಿ. TMDB details ಮತ್ತು IMDb Search link ಕೊಡುತ್ತೇನೆ."
     )
 
 
 async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global quota
-    msg, user = update.effective_message, update.effective_user
-    if not msg or not msg.text or not user:
+    message = update.effective_message
+    if not message or not message.text:
         return
-    if user.id not in ADMINS:
-        allowed, used = await quota.consume(user.id)
-        if not allowed:
-            await msg.reply_text("ನಿಮ್ಮ ಇಂದಿನ 50 AI messages ಮುಗಿದಿವೆ. ನಾಳೆ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.")
-            return
-
-    status = await msg.reply_text("⏳ ಉತ್ತರ ಹುಡುಕುತ್ತಿದ್ದೇನೆ...")
-    search_enabled = needs_movie_search(msg.text)
-    prompt = f"""
-You are a helpful bilingual Kannada/English Telegram assistant.
-User message: {msg.text!r}
-If web search grounding is available, use it for current movie/OTT facts. Never invent
-cast, ratings, OTT platforms, or dates. If an OTT date is not officially announced,
-say Not announced. Only provide an estimated date when reliable sources report it,
-and label it Unconfirmed estimate.
-If the user mentions a named movie or web series, or sends only its title, return JSON:
-{{"kind":"movie","title":"official title","search_term":"short ASCII/English title suitable for a movie search link","language":"...","release":"theatre date or Unknown","cast":"...","plot":"one-line spoiler-free plot","rating":"rating and source or Unknown","ott_status":"...","ott_platform":"...","ott_date":"official date or Not announced","expected_ott_date":"estimate or Not announced","reply":"short answer in user's language"}}
-For any other message return JSON: {{"kind":"chat","reply":"helpful answer in user's language"}}.
-Return JSON only. Do not use markdown fences.
-"""
+    query = message.text.strip()
+    if len(query) < 2 or len(query) > 100:
+        return
     try:
-        data = parse_json(await gemini(prompt, use_search=search_enabled))
-        if not isinstance(data, dict):
-            answer, title, search_term = "ಕ್ಷಮಿಸಿ, ಉತ್ತರ ಸಿದ್ಧಪಡಿಸಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.", None, None
-        elif data.get("kind") == "movie" and data.get("title"):
-            title = str(data["title"]).strip()
-            search_term = str(data.get("search_term") or title).strip()
-            fields = [
-                ("Language", "language"), ("Theatre Release", "release"),
-                ("Cast", "cast"), ("Story", "plot"), ("Rating", "rating"),
-                ("OTT Status", "ott_status"), ("OTT Platform", "ott_platform"),
-                ("OTT Release Date", "ott_date"), ("Expected OTT Date", "expected_ott_date")
-            ]
-            lines = ["🎬 <b>" + html.escape(title) + "</b>"]
-            for label, key in fields:
-                value = str(data.get(key) or "").strip()
-                if value and value.lower() not in ("unknown", "n/a", "none"):
-                    lines.append("<b>" + label + ":</b> " + html.escape(value))
-                elif key in ("ott_date", "expected_ott_date"):
-                    lines.append("<b>" + label + ":</b> Not announced")
-            if data.get("reply"):
-                lines.extend(["", html.escape(str(data["reply"]))])
-            answer = "\n".join(lines)
-        else:
-            title, search_term = None, None
-            answer = str(data.get("reply") or "ಕ್ಷಮಿಸಿ, ಉತ್ತರ ಸಿದ್ಧಪಡಿಸಲು ಆಗಲಿಲ್ಲ.")
-        keyboard = None
-        if title:
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🎬 Search in @" + MOVIE_BOT, url=movie_link(title, search_term))
-            ]])
-        await status.edit_text(answer, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
+        await show_movie(message, query)
+    except httpx.HTTPStatusError as exc:
+        log.warning("TMDB request failed with HTTP %s", exc.response.status_code)
+        await message.reply_text("TMDB search ಈಗ ಲಭ್ಯವಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ.")
     except Exception as exc:
-        # Avoid dumping request URLs, credentials, or long provider traces into Render logs.
-        if getattr(exc, "status_code", None) == 429 or "RESOURCE_EXHAUSTED" in str(exc):
-            log.warning("Gemini quota/rate limit reached (HTTP 429).")
-            message = "Gemini API ಉಚಿತ ಬಳಕೆಯ ಮಿತಿ ಮುಗಿದಿದೆ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ."
-        else:
-            log.error("PM handler failed (%s).", type(exc).__name__)
-            message = "ಕ್ಷಮಿಸಿ, ಈಗ ತಾಂತ್ರಿಕ ಸಮಸ್ಯೆ ಇದೆ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ."
-        await status.edit_text(message)
+        log.error("Movie lookup failed (%s)", type(exc).__name__)
+        await message.reply_text("ಕ್ಷಮಿಸಿ, Movie details ಹುಡುಕಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.")
 
 
 async def group_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.effective_message
-    if not msg or not msg.text:
+    message = update.effective_message
+    if not message or not message.text:
         return
-    text = msg.text.strip()
-    if len(text) < 2 or len(text) > 90 or len(text.split()) > 8 or text.startswith("/"):
+    query = message.text.strip()
+    if len(query) < 3 or len(query) > 90 or len(query.split()) > 8 or query.startswith("/"):
         return
-    prompt = f"""
-Is this text a movie or web-series title, perhaps misspelled? {text!r}
-Use Google Search grounding to verify the official spelling. Be conservative.
-Return JSON only: {{"is_title":true/false,"correct_title":"verified title","confidence":0.0}}.
-Only set confidence >= 0.90 if verified. Never guess.
-"""
     try:
-        data = parse_json(await gemini(prompt, use_search=True))
-        if not isinstance(data, dict) or not data.get("is_title"):
-            return
-        correct = str(data.get("correct_title") or "").strip()
-        confidence = float(data.get("confidence") or 0)
-        if not correct or confidence < 0.90 or correct.casefold() == text.casefold():
-            return
-        await msg.reply_text(
-            "ನಿಮ್ಮ ಮೂವೀ ಸ್ಪೆಲ್ಲಿಂಗ್ ತಪ್ಪಾಗಿದೆ\nYour movie spelling is wrong\n\nCorrect spelling: " + correct,
-            reply_to_message_id=msg.message_id,
-        )
+        await show_movie(message, query, group_check=True)
     except Exception as exc:
-        if getattr(exc, "status_code", None) == 429 or "RESOURCE_EXHAUSTED" in str(exc):
-            log.warning("Gemini quota/rate limit reached during group check (HTTP 429).")
-        else:
-            log.warning("Group spelling check failed (%s).", type(exc).__name__)
-
-
-async def post_init(app):
-    global mongo, quota, ai
-    mongo = AsyncIOMotorClient(MONGO_URI)
-    db = mongo[DB_NAME]
-    await db.command("ping")
-    quota = DailyQuota(db)
-    await quota.initialize()
-    ai = genai.Client(api_key=API_KEY)
-    log.info("MongoDB and Gemini initialized")
-
-
-async def post_shutdown(app):
-    if mongo:
-        mongo.close()
+        log.warning("Group TMDB title check failed (%s)", type(exc).__name__)
 
 
 def main():
-    missing = [k for k, v in {"BOT_TOKEN": TOKEN, "MONGODB_URI": MONGO_URI, "GEMINI_API_KEY": API_KEY}.items() if not v]
+    missing = []
+    if not TOKEN:
+        missing.append("BOT_TOKEN")
+    if not TMDB_API_KEY or TMDB_API_KEY == "PASTE_TMDB_API_KEY_HERE":
+        missing.append("TMDB_API_KEY")
     if missing:
-        raise SystemExit("Missing environment variables: " + ", ".join(missing))
-    app = ApplicationBuilder().token(TOKEN).post_init(post_init).post_shutdown(post_shutdown).build()
+        raise SystemExit("Missing configuration: " + ", ".join(missing))
+    app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, private_reply))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check))
