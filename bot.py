@@ -1114,8 +1114,9 @@ async def apply_tavily_ott_date(details, provider_lines):
             updated.append(line)
     return updated
 
-async def show_title_suggestions(message, query):
-    matches = await find_matching_titles(query)
+async def show_title_suggestions(message, query, matches=None):
+    if matches is None:
+        matches = await find_matching_titles(query)
     if not matches:
         return False
     suggestions = "\n".join(
@@ -1625,25 +1626,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def process_movie_query(message, query, context):
-    """Show suggestions first in PM and groups; details only after a suggested title is sent again."""
+    """Show exact movie details first, followed by the matching title suggestions."""
     pending_key = f"movie_suggestions:{message.chat_id}"
-    pending = context.user_data.get(pending_key, [])
-    query_key = normalize_movie_key(clean_search_title(query))
-    pending_keys = {
-        normalize_movie_key(clean_search_title(title))
-        for title in pending
-    }
-    if query_key and query_key in pending_keys:
-        context.user_data.pop(pending_key, None)
-        return await show_movie(message, query, confirmed=True)
-
     matches = await find_matching_titles(query)
-    if matches:
-        context.user_data[pending_key] = matches
-        return await show_title_suggestions(message, query)
+    if not matches:
+        context.user_data.pop(pending_key, None)
+        return False
 
-    context.user_data.pop(pending_key, None)
-    return False
+    query_key = normalize_movie_key(clean_search_title(query))
+    exact_match = next(
+        (
+            title for title in matches
+            if normalize_movie_key(clean_search_title(title)) == query_key
+        ),
+        None,
+    )
+
+    # Exact match: poster/details/download first, then the suggestions list.
+    if exact_match:
+        await show_movie(message, exact_match, confirmed=True)
+
+    context.user_data[pending_key] = matches
+    await show_title_suggestions(message, query, matches=matches)
+    return True
 
 
 async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
