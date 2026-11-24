@@ -298,13 +298,13 @@ def title_similarity(query, title):
 
 def clean_search_title(query):
     """Remove a trailing release year such as (2026) before title matching."""
-    return re.sub(r"\\s*\\(?\\b(?:19|20)\\d{2}\\)?\\s*$", "", query).strip()
+    return re.sub(r"\s*\(?\b(?:19|20)\d{2}\)?\s*$", "", query).strip()
 
 
 async def find_title(query):
     """Search movies and TV shows; treat a year in brackets as a hint, not part of the title."""
     search_title = clean_search_title(query)
-    year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", query)
+    year_match = re.search(r"\b((?:19|20)\d{2})\b", query)
     requested_year = year_match.group(1) if year_match else None
     found = []
     for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
