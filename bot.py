@@ -231,66 +231,53 @@ def extract_ott_info(caption):
 
 
 def apply_saved_ott_info(provider_lines, saved):
-    """Use MongoDB OTT data only when TMDB/IMDb has no India OTT value."""
+    """Prefer provider OTT details; use only the saved MongoDB OTT date as a final fallback."""
     lines = list(provider_lines or [])
     saved = saved or {}
 
     def is_missing(value):
-        return not value or value.strip().casefold() in {
+        return not value or str(value).strip().casefold() in {
             "not announced yet",
             "not available",
             "not available from imdb",
             "n/a",
+            "not announced",
             "ಬಂದಿಲ್ಲ",
         }
 
-    current_platform = next(
-        (line.split(":", 1)[1].strip() for line in lines if line.startswith("India OTT Platform:")),
-        "",
-    )
     current_date = next(
         (line.split(":", 1)[1].strip() for line in lines if line.startswith("India OTT Release Date:")),
         "",
     )
-
-    # Prefer live TMDB/IMDb values. Use the manually saved database value
-    # only as a fallback when the API has no value for that field.
-    platform = current_platform
-    if is_missing(platform) and not is_missing(saved.get("ott_platform")):
-        platform = saved["ott_platform"].strip()
-
-    release_date = current_date
-    if is_missing(release_date) and not is_missing(saved.get("ott_release_date")):
-        release_date = saved["ott_release_date"].strip()
+    # Use the database date only when TMDB/IMDb has no OTT release date.
+    fallback_date = ""
+    if is_missing(current_date) and not is_missing(saved.get("ott_release_date")):
+        fallback_date = str(saved["ott_release_date"]).strip()
 
     output = []
-    platform_added = False
-    date_added = False
-    telegram_added = False
+    date_line_added = False
     for line in lines:
-        if line.startswith("India OTT Platform:"):
-            if not platform_added:
-                output.append("India OTT Platform: " + (platform or "Not Announced Yet"))
-                platform_added = True
-        elif line.startswith("India OTT Release Date:"):
-            if not date_added:
-                output.append("India OTT Release Date: " + (release_date or "Not Announced Yet"))
-                date_added = True
+        if line.startswith("India OTT Release Date:"):
+            if not date_line_added and not fallback_date:
+                output.append(line)
+            date_line_added = True
         elif line.startswith("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ:"):
-            if not telegram_added:
-                output.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + (release_date if not is_missing(release_date) else "ಬಂದಿಲ್ಲ"))
-                telegram_added = True
+            value = fallback_date or (current_date if not is_missing(current_date) else "ಬಂದಿಲ್ಲ")
+            output.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + value)
         else:
             output.append(line)
 
-    if not platform_added:
-        output.insert(0, "India OTT Platform: " + (platform or "Not Announced Yet"))
-    if not telegram_added:
-        output.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + (release_date if not is_missing(release_date) else "ಬಂದಿಲ್ಲ"))
-    if not date_added:
-        output.append("India OTT Release Date: " + (release_date or "Not Announced Yet"))
-    return output
+    # Add the MongoDB OTT date at the end, without replacing provider platform data.
+    if fallback_date:
+        output.append("India OTT Release Date: " + fallback_date)
+    elif not date_line_added:
+        output.append("India OTT Release Date: " + (current_date or "Not Announced Yet"))
 
+    if not any(line.startswith("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ:") for line in output):
+        value = fallback_date or (current_date if not is_missing(current_date) else "ಬಂದಿಲ್ಲ")
+        output.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + value)
+
+    return output
 
 def apply_saved_theatrical_date(release_lines, saved):
     """Use the manually saved RDATE for a missing theatrical date or series first-air date."""
