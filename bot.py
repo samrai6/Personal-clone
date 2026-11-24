@@ -323,36 +323,53 @@ def apply_saved_theatrical_date(release_lines, saved):
 
 
 def save_suggestion_post(message):
-    """Save title-only suggestion entries from the dedicated Telegram channel."""
+    """Save each non-empty title/year line as a separate suggestion record."""
     caption = (message.caption or message.text or "").strip()
     if not caption:
-        return False
-    first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
-    first_line = re.sub(r"<[^>]+>", "", first_line)
-    first_line = re.sub(r"^[^\w(]+", "", first_line).strip()
-    first_line = re.sub(r"\s+", " ", first_line)
-    year_match = re.search(r"\b((?:19|20)\d{2})\b", first_line)
-    year = year_match.group(1) if year_match else ""
-    title = re.sub(r"\s*[-–—:]?\s*\(?\b(?:19|20)\d{2}\)?\s*$", "", first_line).strip()
-    title_base = normalize_movie_key(clean_search_title(title))
-    if not title_base:
-        return False
+        return 0
+
+    entries = []
+    for raw_line in caption.splitlines():
+        line = re.sub(r"<[^>]+>", "", raw_line).strip()
+        line = re.sub(r"^[^\\w(]+", "", line).strip()
+        line = re.sub(r"\\s+", " ", line)
+        if not line:
+            continue
+
+        year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", line)
+        if not year_match:
+            continue
+        year = year_match.group(1)
+        title = re.sub(
+            r"\\s*[-–—:]?\\s*\\(?\\b(?:19|20)\\d{2}\\)?\\s*$",
+            "",
+            line,
+        ).strip(" -–—:()")
+        title_base = normalize_movie_key(clean_search_title(title))
+        if not title_base:
+            continue
+        entries.append((title, title_base, year))
+
+    if not entries:
+        return 0
+
     with db_connect() as conn:
         if not hasattr(conn, "suggestions"):
             raise RuntimeError("Suggestion Channel storage requires the configured MongoDB connection.")
-        conn.suggestions.update_one(
-            {"title_base": title_base, "year": year},
-            {"$set": {
-                "title": title,
-                "title_base": title_base,
-                "year": year,
-                "channel_id": int(message.chat_id),
-                "message_id": int(message.message_id),
-                "updated_at": datetime.utcnow(),
-            }},
-            upsert=True,
-        )
-    return True
+        for title, title_base, year in entries:
+            conn.suggestions.update_one(
+                {"title_base": title_base, "year": year},
+                {"$set": {
+                    "title": title,
+                    "title_base": title_base,
+                    "year": year,
+                    "channel_id": int(message.chat_id),
+                    "message_id": int(message.message_id),
+                    "updated_at": datetime.utcnow(),
+                }},
+                upsert=True,
+            )
+    return len(entries)
 
 
 def save_movie_post(message):
@@ -1435,9 +1452,9 @@ async def suggestion_database_channel_post(update: Update, context: ContextTypes
     if not message or message.chat_id != SUGGESTION_DATABASE_CHANNEL_ID:
         return
     try:
-        saved = save_suggestion_post(message)
-        if saved:
-            log.info("Suggestion title saved: channel=%s message=%s", message.chat_id, message.message_id)
+        saved_count = save_suggestion_post(message)
+        if saved_count:
+            log.info("Suggestion titles saved: count=%s channel=%s message=%s", saved_count, message.chat_id, message.message_id)
     except Exception as exc:
         log.exception("Could not save suggestion channel post (%s)", type(exc).__name__)
 
