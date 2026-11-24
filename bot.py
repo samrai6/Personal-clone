@@ -106,6 +106,9 @@ class MongoDatabaseConnection:
         self.relay_map = self.db["relay_map"]
         self.movies = self.db["movie_posts"]
         self.movies.create_index("title_base")
+        # Internet-discovered suggestion titles are isolated from manually managed movie posts.
+        self.title_index = self.db["title_index"]
+        self.title_index.create_index([("title_base", 1), ("year", 1)], unique=True)
 
     def execute(self, sql, params=()):
         normalized = " ".join(sql.lower().split())
@@ -575,6 +578,91 @@ async def omdb_get(params):
     return data
 
 
+async def find_external_suggestion_titles(query):
+    """Search IMDb-backed OMDb and Wikidata for additional suggestion titles."""
+    search_title = clean_search_title(query)
+    results = []
+
+    # OMDb is IMDb-linked and requires the optional OMDB_API_KEY.
+    try:
+        data = await omdb_get({"s": search_title, "page": 1})
+        for item in (data or {}).get("Search", []):
+            kind = (item.get("Type") or "").lower()
+            if kind not in {"movie", "series"}:
+                continue
+            year_match = re.search(r"\b((?:19|20)\d{2})\b", item.get("Year") or "")
+            results.append({
+                "title": (item.get("Title") or "").strip(),
+                "year": year_match.group(1) if year_match else "",
+                "source": "omdb",
+            })
+    except Exception as exc:
+        log.warning("OMDb suggestion search unavailable (%s)", type(exc).__name__)
+
+    # Wikidata provides a public catalogue search; keep only film/TV-related entities.
+    try:
+        async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "PersonalCloneBot/1.0"}) as client:
+            response = await client.get(
+                "https://www.wikidata.org/w/api.php",
+                params={
+                    "action": "wbsearchentities",
+                    "search": search_title,
+                    "language": "en",
+                    "uselang": "en",
+                    "format": "json",
+                    "limit": 20,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+        for item in data.get("search", []):
+            name = (item.get("label") or "").strip()
+            description = (item.get("description") or "").casefold()
+            if not name or not any(term in description for term in (
+                "film", "movie", "television series", "tv series", "web series",
+                "animated series", "miniseries", "television program",
+            )):
+                continue
+            year_match = re.search(r"\b((?:19|20)\d{2})\b", description)
+            results.append({
+                "title": name,
+                "year": year_match.group(1) if year_match else "",
+                "source": "wikidata",
+            })
+    except Exception as exc:
+        log.warning("Wikidata suggestion search unavailable (%s)", type(exc).__name__)
+
+    return results
+
+
+def save_indexed_suggestion_titles(records):
+    """Persist only title/year suggestion records in a separate MongoDB collection."""
+    if not records:
+        return
+    with db_connect() as conn:
+        if not hasattr(conn, "title_index"):
+            return
+        for item in records:
+            title = (item.get("title") or "").strip()
+            if not title:
+                continue
+            year = str(item.get("year") or "")
+            title_base = normalize_movie_key(clean_search_title(title))
+            if not title_base:
+                continue
+            conn.title_index.update_one(
+                {"title_base": title_base, "year": year},
+                {"$set": {
+                    "title": title,
+                    "title_base": title_base,
+                    "year": year,
+                    "source": item.get("source") or "internet",
+                    "updated_at": datetime.utcnow(),
+                }},
+                upsert=True,
+            )
+
+
 async def find_imdb_details(query):
     """Use OMDb's IMDb-linked catalogue only when TMDB has no exact title match."""
     search_title = clean_search_title(query)
@@ -723,6 +811,26 @@ async def find_matching_titles(query):
                     add_match(clean_saved_title, saved_year, 0, allow_exact=True)
     except Exception as exc:
         log.warning("Saved movie suggestions unavailable (%s)", type(exc).__name__)
+
+    # Search additional Internet catalogues and persist their title/year suggestions.
+    external_titles = await find_external_suggestion_titles(search_title)
+    try:
+        save_indexed_suggestion_titles(external_titles)
+    except Exception as exc:
+        log.warning("Could not persist Internet suggestion titles (%s)", type(exc).__name__)
+    for item in external_titles:
+        add_match(item.get("title"), item.get("year"), 0, allow_exact=True)
+
+    # Include previously indexed Internet titles in future searches.
+    try:
+        with db_connect() as conn:
+            if hasattr(conn, "title_index"):
+                for indexed in conn.title_index.find({}, {"title": 1, "year": 1}):
+                    indexed_title = (indexed.get("title") or "").strip()
+                    indexed_year = str(indexed.get("year") or "")
+                    add_match(indexed_title, indexed_year, 0, allow_exact=True)
+    except Exception as exc:
+        log.warning("Indexed title suggestions unavailable (%s)", type(exc).__name__)
 
     matches.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
     return [display for _, _, _, display in matches[:10]]
