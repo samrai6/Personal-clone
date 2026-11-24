@@ -211,8 +211,8 @@ def extract_ott_info(caption):
     release_date = None
     for line in text.splitlines():
         line = line.strip()
-        platform_match = re.match(r"^India\\s+OTT\\s+Platform\\s*:\\s*(.+)$", line, re.IGNORECASE)
-        date_match = re.match(r"^India\\s+OTT\\s+Release\\s+Date\\s*:\\s*(.+)$", line, re.IGNORECASE)
+        platform_match = re.match(r"^India\s+OTT\s+Platform\s*:\s*(.+)$", line, re.IGNORECASE)
+        date_match = re.match(r"^India\s+OTT\s+Release\s+Date\s*:\s*(.+)$", line, re.IGNORECASE)
         if platform_match:
             value = platform_match.group(1).strip()
             if value and value.casefold() not in {"not announced yet", "not available", "n/a"}:
