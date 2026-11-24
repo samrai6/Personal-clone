@@ -876,7 +876,7 @@ async def find_matching_titles(query):
                     # Exact normalized DB matches must never be lost because of punctuation
                     # or minor display-title differences (e.g. K.G.F vs KGF).
                     exact_db_match = bool(requested_key and saved_key == requested_key)
-                    add_match(clean_search_title(saved_title), saved_year, 0, source_rank=1, force_exact=exact_db_match)
+                    add_match(clean_search_title(saved_title), saved_year, 0, source_rank=10, force_exact=exact_db_match)
     except Exception as exc:
         log.warning("Saved movie suggestions unavailable (%s)", type(exc).__name__)
 
@@ -887,7 +887,7 @@ async def find_matching_titles(query):
                 for item in conn.suggestions.find({}, {"title": 1, "year": 1}):
                     title = clean_candidate(item.get("title") or "")
                     if valid_title(title):
-                        add_match(title, str(item.get("year") or ""), 0, source_rank=3)
+                        add_match(title, str(item.get("year") or ""), 0, source_rank=10)
     except Exception as exc:
         log.warning("Suggestion Channel titles unavailable (%s)", type(exc).__name__)
 
@@ -947,7 +947,7 @@ async def find_matching_titles(query):
     # TMDb > OMDb > MongoDB index > Movie Channel.
     ordered = sorted(
         seen.values(),
-        key=lambda row: (row[0], row[1], row[2], row[3], row[4]),
+        key=lambda row: (row[0], row[3], row[1], row[2], row[4]),
         reverse=True,
     )
     return [row[5] for row in ordered[:10]]
