@@ -112,7 +112,15 @@ class MongoDatabaseConnection:
         if normalized.startswith("create table"):
             return MongoCursor()
         if normalized.startswith("select value from settings"):
-            return MongoCursor(self.settings.find_one({"key": params[0]}))
+            # Support both parameterized queries and SQL with a literal key.
+            key = params[0] if params else None
+            if key is None:
+                match = re.search(r"\\bkey\\s*=\\s*'([^']*)'", sql, re.IGNORECASE)
+                if match:
+                    key = match.group(1)
+            if key is None:
+                raise ValueError("Settings SELECT query is missing its key")
+            return MongoCursor(self.settings.find_one({"key": str(key)}))
         if normalized.startswith("insert into settings"):
             self.settings.update_one(
                 {"key": params[0]},
