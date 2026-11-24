@@ -293,15 +293,22 @@ def apply_saved_ott_info(provider_lines, saved):
 
 
 def apply_saved_theatrical_date(release_lines, saved):
-    """Use the manually saved theatrical date only when provider data is missing."""
+    """Use the manually saved RDATE for a missing theatrical date or series first-air date."""
     lines = list(release_lines or [])
     saved_date = (saved or {}).get("theatrical_release_date")
     if not saved_date:
         return lines
 
     missing_values = {"", "not announced yet", "not available", "n/a", "not announced", "ಬಂದಿಲ್ಲ"}
+    date_labels = (
+        "India Theatrical Release Date:",
+        "🇮🇳 India Theatrical Release Date:",
+        "India First Air Date:",
+        "🇮🇳 India First Air Date:",
+        "Release Date:",
+    )
     for index, line in enumerate(lines):
-        if line.startswith(("India Theatrical Release Date:", "🇮🇳 India Theatrical Release Date:", "Release Date:")):
+        if line.startswith(date_labels):
             current = line.split(":", 1)[1].strip() if ":" in line else ""
             if current.casefold() in missing_values:
                 label = line.split(":", 1)[0]
