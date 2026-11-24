@@ -1009,7 +1009,7 @@ async def show_movie(message, query, group_check=False):
     # User-managed Telegram Movie Database is checked before online APIs.
     try:
         saved = find_saved_movie(query)
-        if saved and not (saved.get("ott_platform") or saved.get("ott_release_date") or saved.get("theatrical_release_date")):
+        if saved:
             bot = message.get_bot()
             # Re-send the saved poster and make every user-provided caption line bold.
             bold_caption = "<b>" + html.escape(saved.get("caption") or saved.get("title") or "") + "</b>"
