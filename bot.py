@@ -783,7 +783,7 @@ async def find_title(query):
 
 
 async def find_matching_titles(query):
-    """Merge clean titles from all providers; Movie Database Channel is the final fallback source."""
+    """Search local movie databases first; fall back to IMDb/OMDb, then TMDb."""
     matches = []
     seen = {}
     search_title = clean_search_title(query)
@@ -843,7 +843,7 @@ async def find_matching_titles(query):
             return
         year = str(year or "")
         year_score = 1 if requested_year and year == requested_year else 0
-        year_number = int(year) if re.fullmatch(r"\\d{4}", year) else 0
+        year_number = int(year) if re.fullmatch(r"\d{4}", year) else 0
         display = f"{name} ({year})" if year else name
         # For duplicate titles, keep the newest known release year.
         candidate = (exact_score, year_number, source_rank, ratio, year_score, float(popularity or 0), display)
@@ -892,21 +892,29 @@ async def find_matching_titles(query):
     except Exception as exc:
         log.warning("Suggestion Channel titles unavailable (%s)", type(exc).__name__)
 
-    # TMDB catalogue results.
-    for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
-        try:
-            data = await tmdb_get(endpoint, {
-                "query": search_title,
-                "include_adult": "false",
-                "page": 1,
-            })
-            for item in data.get("results", [])[:20]:
-                name = item.get("title") if kind == "movie" else item.get("name")
-                date = item.get("release_date") if kind == "movie" else item.get("first_air_date")
-                year = date[:4] if date else ""
-                add_match(name, year, item.get("popularity") or 0, source_rank=7)
-        except Exception as exc:
-            log.warning("TMDB suggestions unavailable for %s (%s)", kind, type(exc).__name__)
+    # Check previously indexed local database records before calling online providers.
+    # Previously indexed records are filtered again; duplicates merge by title.
+    try:
+        with db_connect() as conn:
+            if hasattr(conn, "title_index"):
+                for indexed in conn.title_index.find({}, {"title": 1, "year": 1, "source": 1}):
+                    # Tavily/web-discovered page titles are not valid suggestion sources.
+                    if str(indexed.get("source") or "").lower() in {"wikidata", "tavily", "internet"}:
+                        continue
+                    title = clean_candidate(indexed.get("title") or "")
+                    if valid_title(title):
+                        add_match(title, str(indexed.get("year") or ""), 0, source_rank=2)
+    except Exception as exc:
+        log.warning("Indexed title suggestions unavailable (%s)", type(exc).__name__)
+
+
+    if seen:
+        ordered = sorted(
+            seen.values(),
+            key=lambda row: (row[0], row[1], row[2], row[3], row[4], row[5]),
+            reverse=True,
+        )
+        return [row[6] for row in ordered[:10]]
 
     # Internet discovery is supplementary; page headlines are not movie titles.
     try:
@@ -930,19 +938,22 @@ async def find_matching_titles(query):
     except Exception as exc:
         log.warning("Could not persist Internet suggestion titles (%s)", type(exc).__name__)
 
-    # Previously indexed records are filtered again; duplicates merge by title.
-    try:
-        with db_connect() as conn:
-            if hasattr(conn, "title_index"):
-                for indexed in conn.title_index.find({}, {"title": 1, "year": 1, "source": 1}):
-                    # Tavily/web-discovered page titles are not valid suggestion sources.
-                    if str(indexed.get("source") or "").lower() in {"wikidata", "tavily", "internet"}:
-                        continue
-                    title = clean_candidate(indexed.get("title") or "")
-                    if valid_title(title):
-                        add_match(title, str(indexed.get("year") or ""), 0, source_rank=2)
-    except Exception as exc:
-        log.warning("Indexed title suggestions unavailable (%s)", type(exc).__name__)
+
+    # TMDB catalogue results.
+    for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
+        try:
+            data = await tmdb_get(endpoint, {
+                "query": search_title,
+                "include_adult": "false",
+                "page": 1,
+            })
+            for item in data.get("results", [])[:20]:
+                name = item.get("title") if kind == "movie" else item.get("name")
+                date = item.get("release_date") if kind == "movie" else item.get("first_air_date")
+                year = date[:4] if date else ""
+                add_match(name, year, item.get("popularity") or 0, source_rank=7)
+        except Exception as exc:
+            log.warning("TMDB suggestions unavailable for %s (%s)", kind, type(exc).__name__)
 
     # Ranking: exact title first, then newest release year; saved DB sources
     # take priority over external providers when title/year are otherwise comparable.
