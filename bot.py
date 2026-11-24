@@ -204,6 +204,66 @@ def normalize_movie_key(value):
     return re.sub(r"[^a-z0-9]+", "", (value or "").casefold())
 
 
+def extract_ott_info(caption):
+    """Read India OTT platform and release date manually supplied in a database post."""
+    text = re.sub(r"<[^>]+>", "", caption or "")
+    platform = None
+    release_date = None
+    for line in text.splitlines():
+        line = line.strip()
+        platform_match = re.match(r"^India\\s+OTT\\s+Platform\\s*:\\s*(.+)$", line, re.IGNORECASE)
+        date_match = re.match(r"^India\\s+OTT\\s+Release\\s+Date\\s*:\\s*(.+)$", line, re.IGNORECASE)
+        if platform_match:
+            value = platform_match.group(1).strip()
+            if value and value.casefold() not in {"not announced yet", "not available", "n/a"}:
+                platform = value
+        if date_match:
+            value = date_match.group(1).strip()
+            if value and value.casefold() not in {"not announced yet", "not available", "n/a", "ಬಂದಿಲ್ಲ"}:
+                release_date = value
+    return platform, release_date
+
+
+def apply_saved_ott_info(provider_lines, saved):
+    """Prefer manually verified India OTT data from MongoDB over incomplete TMDB data."""
+    if not saved:
+        return provider_lines
+    platform = saved.get("ott_platform")
+    release_date = saved.get("ott_release_date")
+    if not platform and not release_date:
+        return provider_lines
+
+    lines = list(provider_lines or [])
+    platform_line = "India OTT Platform: " + (platform or "Not Announced Yet")
+    date_line = "India OTT Release Date: " + (release_date or "Not Announced Yet")
+    telegram_line = "📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + (release_date or "ಬಂದಿಲ್ಲ")
+
+    replaced = set()
+    output = []
+    for line in lines:
+        if line.startswith("India OTT Platform:"):
+            if "platform" not in replaced:
+                output.append(platform_line)
+                replaced.add("platform")
+        elif line.startswith("India OTT Release Date:"):
+            if "date" not in replaced:
+                output.append(date_line)
+                replaced.add("date")
+        elif line.startswith("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ:"):
+            if "telegram" not in replaced:
+                output.append(telegram_line)
+                replaced.add("telegram")
+        else:
+            output.append(line)
+    if "platform" not in replaced:
+        output.insert(0, platform_line)
+    if "telegram" not in replaced:
+        output.append(telegram_line)
+    if "date" not in replaced:
+        output.append(date_line)
+    return output
+
+
 def save_movie_post(message):
     caption = (message.caption or message.text or "").strip()
     if not caption:
@@ -218,11 +278,14 @@ def save_movie_post(message):
     year_match = re.search(r"\b((?:19|20)\d{2})\b", title)
     year = year_match.group(1) if year_match else ""
     photo_file_id = message.photo[-1].file_id if message.photo else None
+    ott_platform, ott_release_date = extract_ott_info(caption)
     record = {
         "title": title,
         "title_base": title_base,
         "year": year,
         "caption": caption,
+        "ott_platform": ott_platform,
+        "ott_release_date": ott_release_date,
         "photo_file_id": photo_file_id,
         "channel_id": int(message.chat_id),
         "message_id": int(message.message_id),
@@ -573,7 +636,7 @@ async def show_movie(message, query, group_check=False):
     # User-managed Telegram Movie Database is checked before online APIs.
     try:
         saved = find_saved_movie(query)
-        if saved:
+        if saved and not (saved.get("ott_platform") or saved.get("ott_release_date")):
             bot = message.get_bot()
             # Re-send the saved poster and make every user-provided caption line bold.
             bold_caption = "<b>" + html.escape(saved.get("caption") or saved.get("title") or "") + "</b>"
@@ -636,6 +699,7 @@ async def show_movie(message, query, group_check=False):
             try:
                 details = await title_details(kind, item)
                 release_lines, provider_lines = await release_and_ott(kind, item["id"])
+                provider_lines = apply_saved_ott_info(provider_lines, saved)
             except Exception as exc:
                 log.warning("TMDB details unavailable; trying IMDb fallback (%s)", type(exc).__name__)
                 details = None
