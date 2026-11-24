@@ -49,6 +49,8 @@ OWNER_ID = 1315244338
 TMDB_BEARER_TOKEN = os.getenv("TMDB_BEARER_TOKEN", "").strip()
 MOVIE_BOT = "Samp_yu5bot"
 TMDB_BASE = "https://api.themoviedb.org/3"
+OMDB_API_KEY = "7a1cd816"
+OMDB_BASE = "https://www.omdbapi.com/"
 LANGUAGE = "en-US"
 
 COUNTRY = "IN"
@@ -278,6 +280,62 @@ async def tmdb_get(path, params=None):
         return response.json()
 
 
+async def omdb_get(params):
+    query = {"apikey": OMDB_API_KEY, **params}
+    async with httpx.AsyncClient(timeout=15) as client:
+        response = await client.get(OMDB_BASE, params=query)
+        response.raise_for_status()
+        data = response.json()
+    if data.get("Response") != "True":
+        return None
+    return data
+
+
+async def find_imdb_details(query):
+    """Use OMDb's IMDb-linked catalogue only when TMDB has no exact title match."""
+    search_title = clean_search_title(query)
+    requested_year = re.search(r"\\b((?:19|20)\\d{2})\\b", query)
+    params = {"s": search_title, "page": 1}
+    if requested_year:
+        params["y"] = requested_year.group(1)
+    results = await omdb_get(params)
+    if not results:
+        return None
+    normalized_query = re.sub(r"[^a-z0-9]+", "", search_title.casefold())
+    candidates = []
+    for item in results.get("Search", []):
+        title = item.get("Title") or ""
+        normalized_title = re.sub(r"[^a-z0-9]+", "", title.casefold())
+        if normalized_title == normalized_query and item.get("imdbID"):
+            year = (item.get("Year") or "")[:4]
+            year_score = 1 if requested_year and year == requested_year.group(1) else 0
+            candidates.append((year_score, item))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda row: row[0], reverse=True)
+    full = await omdb_get({"i": candidates[0][1]["imdbID"], "plot": "full"})
+    if not full:
+        return None
+    poster = full.get("Poster")
+    if poster == "N/A":
+        poster = None
+    return {
+        "title": full.get("Title") or candidates[0][1].get("Title") or search_title,
+        "year": (full.get("Year") or "N/A")[:4],
+        "date": full.get("Released") or "Not announced",
+        "poster": poster,
+        "poster_url": poster,
+        "overview": full.get("Plot") if full.get("Plot") != "N/A" else "Synopsis not available.",
+        "rating": (full.get("imdbRating") + "/10") if full.get("imdbRating") not in (None, "N/A") else "N/A",
+        "rating_label": "IMDb Rating",
+        "genres": full.get("Genre") if full.get("Genre") != "N/A" else "N/A",
+        "cast": full.get("Actors") if full.get("Actors") != "N/A" else "N/A",
+        "languages": full.get("Language") if full.get("Language") != "N/A" else "Not Available",
+        "imdb_id": full.get("imdbID"),
+        "kind": "Web Series" if full.get("Type") == "series" else "Movie",
+    }
+
+
 def movie_link(title):
     slug = re.sub(r"[^A-Za-z0-9]+", "-", title.strip()).strip("-") or "movie"
     return f"https://t.me/{MOVIE_BOT}?start=" + ("getfile-" + slug)[:64].strip("-")
@@ -437,26 +495,38 @@ async def show_movie(message, query, group_check=False):
         await show_title_suggestions(message, query)
         return
 
-    result = await find_title(query)
-    if not result:
-        return await show_title_suggestions(message, query)
+    result = None
+    try:
+        result = await find_title(query)
+    except Exception as exc:
+        log.warning("TMDB search unavailable; trying IMDb fallback (%s)", type(exc).__name__)
 
-    # In PM, show details only when the searched title exactly matches
-    # the TMDB title (ignoring spaces and punctuation). Otherwise show
-    # the same spelling suggestions used in groups.
-    kind, item, similarity = result
-    matched_title = item.get("title") if kind == "movie" else item.get("name")
-    clean_query = re.sub(r"[^a-z0-9]+", "", clean_search_title(query).casefold())
-    clean_title = re.sub(r"[^a-z0-9]+", "", (matched_title or "").casefold())
-    if not clean_query or clean_query != clean_title:
-        return await show_title_suggestions(message, query)
+    details = None
+    release_lines, provider_lines = [], []
+    if result:
+        # Accept TMDB only when the title matches exactly (ignoring punctuation/year).
+        kind, item, similarity = result
+        matched_title = item.get("title") if kind == "movie" else item.get("name")
+        clean_query = re.sub(r"[^a-z0-9]+", "", clean_search_title(query).casefold())
+        clean_title = re.sub(r"[^a-z0-9]+", "", (matched_title or "").casefold())
+        if clean_query and clean_query == clean_title:
+            details = await title_details(kind, item)
+            release_lines, provider_lines = await release_and_ott(kind, item["id"])
 
-    details = await title_details(kind, item)
-    release_lines, provider_lines = await release_and_ott(kind, item["id"])
+    # If TMDB has no exact match (or is unavailable), search IMDb via OMDb.
+    if details is None:
+        try:
+            details = await find_imdb_details(query)
+        except Exception as exc:
+            log.warning("IMDb fallback unavailable (%s)", type(exc).__name__)
+        if details is None:
+            return await show_title_suggestions(message, query)
+        release_lines = [f"Release Date: {details['date']}"]
+        provider_lines = ["India OTT Platform: Not Available from IMDb"]
     lines = [
         f"🎬 <b>{html.escape(details['title'])} ({html.escape(details['year'])})</b>",
         f"📌 <b>Type:</b> {details['kind']}",
-        f"⭐ <b>TMDb Rating:</b> {html.escape(details['rating'])}",
+        f"⭐ <b>{html.escape(details.get('rating_label', 'TMDb Rating'))}:</b> {html.escape(details['rating'])}",
         f"🎭 <b>Genre:</b> {html.escape(details['genres'])}",
         f"🌐 Available Languages: {html.escape(details['languages'])}",
         f"👥 <b>Cast:</b> {html.escape(details['cast'])}",
@@ -478,10 +548,11 @@ async def show_movie(message, query, group_check=False):
         lines[-1] = html.escape(overview[:remaining].rstrip() + ("…" if len(overview) > remaining else ""))
         caption = "<b>" + "\n".join(lines) + "</b>"
     poster = details.get("poster")
-    if poster and len(caption) <= 1024:
-        await reply_photo_auto(message, photo=f"https://image.tmdb.org/t/p/w500{poster}", caption=caption, parse_mode="HTML", reply_markup=keyboard)
-    elif poster:
-        await reply_photo_auto(message, photo=f"https://image.tmdb.org/t/p/w500{poster}", reply_markup=keyboard)
+    poster_url = details.get("poster_url") or (f"https://image.tmdb.org/t/p/w500{poster}" if poster else None)
+    if poster_url and len(caption) <= 1024:
+        await reply_photo_auto(message, photo=poster_url, caption=caption, parse_mode="HTML", reply_markup=keyboard)
+    elif poster_url:
+        await reply_photo_auto(message, photo=poster_url, reply_markup=keyboard)
         await reply_text_auto(message, caption, parse_mode="HTML", disable_web_page_preview=True)
     else:
         await reply_text_auto(message, caption, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
