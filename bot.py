@@ -847,7 +847,9 @@ async def find_matching_titles(query):
         "wikipedia", "rotten tomatoes", "the movie database", "tmdb", "imdb",
         "tv guide", "where to watch", "watch and stream", "full movie",
         "blockbuster", "official trailer", "film series", "movie series",
-        "review", "explained", "cast:",
+        "review", "explained", "cast:", "streaming", "prime video",
+        "amazon prime", "netflix", "hotstar", "jiohotstar", "zee5",
+        "sony liv", "download", "watch online", "ott platform", "trailer",
     )
 
     def clean_candidate(value):
@@ -888,7 +890,9 @@ async def find_matching_titles(query):
         # Exact normalized title always ranks above partial/close matches.
         exact_score = 1 if normalize_movie_key(search_title) == normalize_movie_key(name) else 0
         # Trust an exact MongoDB key even if display punctuation differs.
-        if ratio < 0.45 and not force_exact:
+        # Reject weakly related titles; this prevents unrelated results such as
+        # "Ramayana" from appearing for "Premada Oorali".
+        if ratio < 0.50 and not force_exact:
             return
         year = str(year or "")
         year_score = 1 if requested_year and year == requested_year else 0
@@ -954,7 +958,7 @@ async def find_matching_titles(query):
     clean_external = []
     for item in external_titles:
         title = clean_candidate(item.get("title") or "")
-        if valid_title(title) and title_similarity(search_title, title) >= 0.45:
+        if valid_title(title) and title_similarity(search_title, title) >= 0.55:
             clean_external.append({**item, "title": title})
             add_match(title, item.get("year"), 0, source_rank=1)
     try:
