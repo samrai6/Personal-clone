@@ -331,17 +331,17 @@ def save_suggestion_post(message):
     entries = []
     for raw_line in caption.splitlines():
         line = re.sub(r"<[^>]+>", "", raw_line).strip()
-        line = re.sub(r"^[^\\w(]+", "", line).strip()
-        line = re.sub(r"\\s+", " ", line)
+        line = re.sub(r"^[^\w(]+", "", line).strip()
+        line = re.sub(r"\s+", " ", line)
         if not line:
             continue
 
-        year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", line)
+        year_match = re.search(r"\b((?:19|20)\d{2})\b", line)
         if not year_match:
             continue
         year = year_match.group(1)
         title = re.sub(
-            r"\\s*[-–—:]?\\s*\\(?\\b(?:19|20)\\d{2}\\)?\\s*$",
+            r"\s*[-–—:]?\s*\(?\b(?:19|20)\d{2}\)?\s*$",
             "",
             line,
         ).strip(" -–—:()")
