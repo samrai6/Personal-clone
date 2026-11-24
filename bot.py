@@ -725,7 +725,7 @@ async def find_matching_titles(query):
         log.warning("Saved movie suggestions unavailable (%s)", type(exc).__name__)
 
     matches.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
-    return [display for _, _, _, display in matches[:5]]
+    return [display for _, _, _, display in matches[:10]]
 
 
 async def title_details(kind, item):
