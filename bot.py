@@ -574,11 +574,46 @@ async def show_movie(message, query, group_check=False):
     try:
         saved = find_saved_movie(query)
         if saved:
-            await message.get_bot().copy_message(
-                chat_id=message.chat_id,
-                from_chat_id=saved["channel_id"],
-                message_id=saved["message_id"],
-            )
+            bot = message.get_bot()
+            # Re-send the saved poster and make every user-provided caption line bold.
+            bold_caption = "<b>" + html.escape(saved.get("caption") or saved.get("title") or "") + "</b>"
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬇️ Download", url=movie_link(clean_search_title(saved.get("title") or query)))
+            ]])
+            photo_id = saved.get("photo_file_id")
+            if photo_id:
+                if len(bold_caption) <= 1024:
+                    sent = await bot.send_photo(
+                        chat_id=message.chat_id,
+                        photo=photo_id,
+                        caption=bold_caption,
+                        parse_mode="HTML",
+                        reply_markup=keyboard,
+                    )
+                    schedule_auto_delete(sent, bot)
+                else:
+                    sent = await bot.send_photo(
+                        chat_id=message.chat_id,
+                        photo=photo_id,
+                        reply_markup=keyboard,
+                    )
+                    schedule_auto_delete(sent, bot)
+                    sent_text = await bot.send_message(
+                        chat_id=message.chat_id,
+                        text=bold_caption[:4000],
+                        parse_mode="HTML",
+                        disable_web_page_preview=True,
+                    )
+                    schedule_auto_delete(sent_text, bot)
+            else:
+                sent = await bot.send_message(
+                    chat_id=message.chat_id,
+                    text=bold_caption[:4000],
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                    disable_web_page_preview=True,
+                )
+                schedule_auto_delete(sent, bot)
             return True
     except Exception as exc:
         log.warning("Movie database lookup/copy failed; falling back to APIs (%s)", type(exc).__name__)
