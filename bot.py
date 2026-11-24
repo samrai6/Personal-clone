@@ -664,28 +664,68 @@ async def find_title(query):
 
 
 async def find_matching_titles(query):
-    """Return distinct TMDB movie and TV title suggestions for group spelling help."""
+    """Return matching TMDB and locally saved MongoDB movie titles, including release years."""
     matches = []
     seen = set()
+    search_title = clean_search_title(query)
+    requested_year_match = re.search(r"\b((?:19|20)\d{2})\b", query)
+    requested_year = requested_year_match.group(1) if requested_year_match else None
+    clean_query = re.sub(r"[^a-z0-9]+", "", search_title.casefold())
+
+    def add_match(name, year="", popularity=0.0, allow_exact=False):
+        if not name:
+            return
+        clean_name = re.sub(r"[^a-z0-9]+", "", name.casefold())
+        key = (clean_name, str(year or ""))
+        if key in seen:
+            return
+        ratio = title_similarity(search_title, name)
+        if ratio < 0.45:
+            return
+        if clean_name == clean_query and not allow_exact and not requested_year:
+            return
+        seen.add(key)
+        year_score = 1 if requested_year and str(year or "") == requested_year else 0
+        display = f"{name} ({year})" if year else name
+        matches.append((ratio, year_score, float(popularity or 0), display))
+
+    # Search TMDB results.
     for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
-        data = await tmdb_get(endpoint, {"query": query, "include_adult": "false", "page": 1})
-        for item in data.get("results", [])[:10]:
-            name = item.get("title") if kind == "movie" else item.get("name")
-            if not name:
-                continue
-            key = re.sub(r"[^a-z0-9]+", "", name.casefold())
-            clean_query = re.sub(r"[^a-z0-9]+", "", query.casefold())
-            if key == clean_query or key in seen:
-                continue
-            seen.add(key)
-            ratio = title_similarity(query, name)
-            matches.append((ratio, float(item.get("popularity") or 0), name))
-    matches.sort(key=lambda row: (row[0], row[1]), reverse=True)
-    # Limit suggestions to the five closest matches.
-    # Ignore weak matches so unrelated titles are never suggested.
-    if not matches or matches[0][0] < 0.45:
-        return []
-    return [name for _, _, name in matches[:5]]
+        try:
+            data = await tmdb_get(endpoint, {
+                "query": search_title,
+                "include_adult": "false",
+                "page": 1,
+            })
+            for item in data.get("results", [])[:10]:
+                name = item.get("title") if kind == "movie" else item.get("name")
+                date = item.get("release_date") if kind == "movie" else item.get("first_air_date")
+                year = date[:4] if date else ""
+                add_match(name, year, item.get("popularity") or 0)
+        except Exception as exc:
+            log.warning("TMDB suggestions unavailable for %s (%s)", kind, type(exc).__name__)
+
+    # Also search titles saved from the Movie Database Channel in MongoDB.
+    try:
+        with db_connect() as conn:
+            if hasattr(conn, "movies"):
+                for saved in conn.movies.find(
+                    {},
+                    {"title": 1, "year": 1},
+                ):
+                    saved_title = (saved.get("title") or "").strip()
+                    saved_year = str(saved.get("year") or "")
+                    # Older records may have the year only embedded in the title.
+                    if not saved_year:
+                        year_match = re.search(r"\b((?:19|20)\d{2})\b", saved_title)
+                        saved_year = year_match.group(1) if year_match else ""
+                    clean_saved_title = clean_search_title(saved_title)
+                    add_match(clean_saved_title, saved_year, 0, allow_exact=True)
+    except Exception as exc:
+        log.warning("Saved movie suggestions unavailable (%s)", type(exc).__name__)
+
+    matches.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+    return [display for _, _, _, display in matches[:5]]
 
 
 async def title_details(kind, item):
