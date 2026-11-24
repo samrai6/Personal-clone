@@ -403,30 +403,40 @@ def update_saved_ott_date(message):
 
 
 def delete_saved_movie_record(message):
-    """Delete one movie's saved MongoDB record from an explicit Delete Channel command."""
+    """Delete the MongoDB movie record when its database-channel post is forwarded/copied here."""
     caption = (message.caption or message.text or "").strip()
-    if not caption:
-        return False
-
     first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
     first_line = re.sub(r"<[^>]+>", "", first_line).strip()
-    match = re.match(r"^DELETE\s*:\s*(.+)$", first_line, re.IGNORECASE)
-    if not match:
-        return False
 
-    title = match.group(1).strip()
-    year_match = re.search(r"\b((?:19|20)\d{2})\b", title)
-    if not year_match:
-        return False
-
-    title_base = normalize_movie_key(clean_search_title(title))
-    year = year_match.group(1)
-    if not title_base:
-        return False
-
+    # Best match: forwarded original post from the Movie Database Channel.
+    origin = getattr(message, "forward_origin", None)
+    origin_chat = getattr(origin, "chat", None)
+    origin_chat_id = getattr(origin_chat, "id", None)
+    origin_message_id = getattr(origin, "message_id", None)
     with db_connect() as conn:
         if not hasattr(conn, "movies"):
             raise RuntimeError("Movie deletion requires the configured MongoDB connection.")
+        if origin_chat_id == MOVIE_DATABASE_CHANNEL_ID and origin_message_id:
+            result = conn.movies.delete_one({
+                "channel_id": int(origin_chat_id),
+                "message_id": int(origin_message_id),
+            })
+            if result.deleted_count:
+                return True
+
+        # Also support copied posts (which have no forward_origin) by reading
+        # the original movie title/year from the copied caption's first line.
+        explicit = re.match(r"^DELETE\\s*:\\s*(.+)$", first_line, re.IGNORECASE)
+        title = explicit.group(1).strip() if explicit else first_line
+        if re.search(r"\\b(?:RDATE|Date)\\s*:", title, re.IGNORECASE):
+            return False
+        year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", title)
+        if not year_match:
+            return False
+        title_base = normalize_movie_key(clean_search_title(title))
+        year = year_match.group(1)
+        if not title_base:
+            return False
         result = conn.movies.delete_one({"title_base": title_base, "year": year})
     return result.deleted_count > 0
 
@@ -1052,12 +1062,27 @@ async def movie_ott_update_channel_post(update: Update, context: ContextTypes.DE
         return
     try:
         caption = (message.caption or message.text or "").strip()
-        if re.match(r"^\s*DELETE\s*:", caption, re.IGNORECASE):
+        # A forwarded/copied movie post (or an explicit DELETE command) removes
+        # the corresponding saved MongoDB record. Date/RDATE messages only update dates.
+        first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
+        is_explicit_delete = bool(re.match(r"^\\s*DELETE\\s*:", caption, re.IGNORECASE))
+        origin = getattr(message, "forward_origin", None)
+        origin_chat = getattr(origin, "chat", None)
+        is_forwarded_database_post = (
+            getattr(origin_chat, "id", None) == MOVIE_DATABASE_CHANNEL_ID
+        )
+        is_copied_movie_post = (
+            not is_explicit_delete
+            and not is_forwarded_database_post
+            and bool(re.search(r"\\b((?:19|20)\\d{2})\\b", first_line))
+            and not re.search(r"\\b(?:RDATE|Date)\\s*:", first_line, re.IGNORECASE)
+        )
+        if is_explicit_delete or is_forwarded_database_post or is_copied_movie_post:
             deleted = delete_saved_movie_record(message)
             if deleted:
                 log.info("Movie database record deleted from Delete Channel: message=%s", message.message_id)
             else:
-                log.warning("Movie delete command ignored: movie/year not found (message=%s)", message.message_id)
+                log.warning("Movie delete post did not match a saved record (message=%s)", message.message_id)
             return
 
         updated = update_saved_ott_date(message)
