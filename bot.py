@@ -877,7 +877,7 @@ async def find_matching_titles(query):
             return False
         return True
 
-    def add_match(name, year="", popularity=0.0, source_rank=0):
+    def add_match(name, year="", popularity=0.0, source_rank=0, force_exact=False):
         name = clean_candidate(name)
         if not valid_title(name):
             return
@@ -885,7 +885,9 @@ async def find_matching_titles(query):
         if not clean_name:
             return
         ratio = title_similarity(search_title, name)
-        if ratio < 0.45:
+        # MongoDB title_base is already punctuation-free; trust an exact key match
+        # even when the stored display title contains extra punctuation/formatting.
+        if ratio < 0.45 and not force_exact:
             return
         year = str(year or "")
         year_score = 1 if requested_year and year == requested_year else 0
@@ -904,13 +906,24 @@ async def find_matching_titles(query):
     try:
         with db_connect() as conn:
             if hasattr(conn, "movies"):
-                for saved in conn.movies.find({}, {"title": 1, "year": 1}):
+                requested_key = normalize_movie_key(search_title)
+                for saved in conn.movies.find({}, {"title": 1, "title_base": 1, "year": 1, "caption": 1}):
                     saved_title = (saved.get("title") or "").strip()
+                    if not saved_title and saved.get("caption"):
+                        saved_title = next(
+                            (line.strip() for line in str(saved["caption"]).splitlines() if line.strip()),
+                            "",
+                        )
+                        saved_title = re.sub(r"<[^>]+>", "", saved_title).strip()
                     saved_year = str(saved.get("year") or "")
                     if not saved_year:
                         year_match = re.search(r"\b((?:19|20)\d{2})\b", saved_title)
                         saved_year = year_match.group(1) if year_match else ""
-                    add_match(clean_search_title(saved_title), saved_year, 0, source_rank=3)
+                    saved_key = str(saved.get("title_base") or normalize_movie_key(clean_search_title(saved_title)))
+                    # Exact normalized DB matches must never be lost because of punctuation
+                    # or minor display-title differences (e.g. K.G.F vs KGF).
+                    exact_db_match = bool(requested_key and saved_key == requested_key)
+                    add_match(clean_search_title(saved_title), saved_year, 0, source_rank=3, force_exact=exact_db_match)
     except Exception as exc:
         log.warning("Saved movie suggestions unavailable (%s)", type(exc).__name__)
 
