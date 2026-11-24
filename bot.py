@@ -579,7 +579,7 @@ async def omdb_get(params):
 
 
 async def find_external_suggestion_titles(query):
-    """Search IMDb-backed OMDb and Wikidata for additional suggestion titles."""
+    """Search IMDb-backed OMDb, Wikidata and Tavily for additional movie/TV titles."""
     search_title = clean_search_title(query)
     results = []
 
@@ -590,7 +590,7 @@ async def find_external_suggestion_titles(query):
             kind = (item.get("Type") or "").lower()
             if kind not in {"movie", "series"}:
                 continue
-            year_match = re.search(r"\b((?:19|20)\d{2})\b", item.get("Year") or "")
+            year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", item.get("Year") or "")
             results.append({
                 "title": (item.get("Title") or "").strip(),
                 "year": year_match.group(1) if year_match else "",
@@ -623,7 +623,7 @@ async def find_external_suggestion_titles(query):
                 "animated series", "miniseries", "television program",
             )):
                 continue
-            year_match = re.search(r"\b((?:19|20)\d{2})\b", description)
+            year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", description)
             results.append({
                 "title": name,
                 "year": year_match.group(1) if year_match else "",
@@ -632,7 +632,53 @@ async def find_external_suggestion_titles(query):
     except Exception as exc:
         log.warning("Wikidata suggestion search unavailable (%s)", type(exc).__name__)
 
-    # Google web results are available when a Programmable Search Engine is configured.
+    # Tavily web search. Only keep page titles that visibly match the requested title.
+    tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
+    if tavily_key:
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.post(
+                    "https://api.tavily.com/search",
+                    json={
+                        "api_key": tavily_key,
+                        "query": f'"{search_title}" movie OR film OR web series OR TV series',
+                        "search_depth": "basic",
+                        "topic": "general",
+                        "max_results": 10,
+                        "include_answer": False,
+                        "include_raw_content": False,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            query_key = normalize_movie_key(search_title)
+            for item in data.get("results", []):
+                page_title = (item.get("title") or "").strip()
+                content = (item.get("content") or "").strip()
+                if not page_title:
+                    continue
+
+                # Avoid saving generic articles and search pages as movie titles.
+                title_key = normalize_movie_key(page_title)
+                if not query_key or query_key not in title_key:
+                    continue
+
+                year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", page_title)
+                if not year_match:
+                    year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", content)
+                results.append({
+                    "title": page_title,
+                    "year": year_match.group(1) if year_match else "",
+                    "source": "tavily",
+                })
+        except Exception as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            log.warning("Tavily suggestion search unavailable (status=%s, error=%s)", status, type(exc).__name__)
+    else:
+        log.info("Tavily suggestion search skipped: TAVILY_API_KEY is not configured")
+
+    # Google Custom Search remains optional when both credentials are configured.
     google_key = os.getenv("GOOGLE_CSE_API_KEY", "").strip()
     google_cx = os.getenv("GOOGLE_CSE_ID", "").strip()
     if google_key and google_cx:
@@ -654,7 +700,7 @@ async def find_external_suggestion_titles(query):
                 if not name:
                     continue
                 text_to_check = name + " " + (item.get("snippet") or "")
-                year_match = re.search(r"\b((?:19|20)\d{2})\b", text_to_check)
+                year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", text_to_check)
                 results.append({
                     "title": name,
                     "year": year_match.group(1) if year_match else "",
