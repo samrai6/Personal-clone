@@ -586,7 +586,7 @@ async def omdb_get(params):
 
 
 async def find_external_suggestion_titles(query):
-    """Search OMDb and Tavily for additional movie/TV titles."""
+    """Search OMDb for additional movie/TV title suggestions. Web search is reserved for OTT research."""
     search_title = clean_search_title(query)
     results = []
 
@@ -606,51 +606,6 @@ async def find_external_suggestion_titles(query):
     except Exception as exc:
         log.warning("OMDb suggestion search unavailable (%s)", type(exc).__name__)
 
-    # Tavily web search. Only keep page titles that visibly match the requested title.
-    tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
-    if tavily_key:
-        try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                response = await client.post(
-                    "https://api.tavily.com/search",
-                    json={
-                        "api_key": tavily_key,
-                        "query": f'"{search_title}" movie OR film OR web series OR TV series',
-                        "search_depth": "basic",
-                        "topic": "general",
-                        "max_results": 10,
-                        "include_answer": False,
-                        "include_raw_content": False,
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-
-            query_key = normalize_movie_key(search_title)
-            for item in data.get("results", []):
-                page_title = (item.get("title") or "").strip()
-                content = (item.get("content") or "").strip()
-                if not page_title:
-                    continue
-
-                # Avoid saving generic articles and search pages as movie titles.
-                title_key = normalize_movie_key(page_title)
-                if not query_key or query_key not in title_key:
-                    continue
-
-                year_match = re.search(r"\b((?:19|20)\\d{2})\\b", page_title)
-                if not year_match:
-                    year_match = re.search(r"\b((?:19|20)\\d{2})\\b", content)
-                results.append({
-                    "title": page_title,
-                    "year": year_match.group(1) if year_match else "",
-                    "source": "tavily",
-                })
-        except Exception as exc:
-            status = getattr(getattr(exc, "response", None), "status_code", None)
-            log.warning("Tavily suggestion search unavailable (status=%s, error=%s)", status, type(exc).__name__)
-    else:
-        log.info("Tavily suggestion search skipped: TAVILY_API_KEY is not configured")
 
 
     return results
@@ -897,7 +852,7 @@ async def find_matching_titles(query):
         title = clean_candidate(item.get("title") or "")
         if valid_title(title) and title_similarity(search_title, title) >= 0.55:
             clean_external.append({**item, "title": title})
-            # Provider priority: OMDb > Tavily.
+            # Provider priority: TMDb > OMDb; web search is used only for OTT research.
             provider_rank = {
                 "omdb": 6,
                 "tavily": 4,
@@ -913,7 +868,8 @@ async def find_matching_titles(query):
         with db_connect() as conn:
             if hasattr(conn, "title_index"):
                 for indexed in conn.title_index.find({}, {"title": 1, "year": 1, "source": 1}):
-                    if str(indexed.get("source") or "").lower() == "wikidata":
+                    # Tavily/web-discovered page titles are not valid suggestion sources.
+                    if str(indexed.get("source") or "").lower() in {"wikidata", "tavily", "internet"}:
                         continue
                     title = clean_candidate(indexed.get("title") or "")
                     if valid_title(title):
@@ -922,7 +878,7 @@ async def find_matching_titles(query):
         log.warning("Indexed title suggestions unavailable (%s)", type(exc).__name__)
 
     # Ranking: exact/closest title and requested year first; provider priority is
-    # TMDb > OMDb > Tavily > MongoDB index > Movie Channel.
+    # TMDb > OMDb > MongoDB index > Movie Channel.
     ordered = sorted(
         seen.values(),
         key=lambda row: (row[0], row[1], row[2], row[3], row[4]),
