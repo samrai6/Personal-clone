@@ -713,7 +713,9 @@ async def show_movie(message, query, group_check=False):
         if details is None:
             return await show_title_suggestions(message, query)
         release_lines = [f"Release Date: {details['date']}"]
-        provider_lines = ["India OTT Platform: Not Available from IMDb"]
+        provider_lines = apply_saved_ott_info(
+            ["India OTT Platform: Not Available from IMDb"], saved
+        )
     lines = [
         f"🎬 <b>{html.escape(details['title'])} ({html.escape(details['year'])})</b>",
         f"📌 <b>Type:</b> {details['kind']}",
