@@ -885,22 +885,24 @@ async def find_matching_titles(query):
         if not clean_name:
             return
         ratio = title_similarity(search_title, name)
-        # MongoDB title_base is already punctuation-free; trust an exact key match
-        # even when the stored display title contains extra punctuation/formatting.
+        # Exact normalized title always ranks above partial/close matches.
+        exact_score = 1 if normalize_movie_key(search_title) == normalize_movie_key(name) else 0
+        # Trust an exact MongoDB key even if display punctuation differs.
         if ratio < 0.45 and not force_exact:
             return
         year = str(year or "")
         year_score = 1 if requested_year and year == requested_year else 0
         display = f"{name} ({year})" if year else name
-        # Deduplicate by title alone; prefer the version that includes a year.
+        # Keep the strongest version of a duplicate title, preferring a known year.
+        candidate = (exact_score, ratio, year_score, source_rank, float(popularity or 0), display)
         if clean_name in seen:
             old = seen[clean_name]
-            if (year and not old[4].endswith(")")) or (
-                source_rank > old[0] and not old[4].endswith(")")
-            ):
-                seen[clean_name] = (source_rank, ratio, year_score, float(popularity or 0), display)
+            old_has_year = bool(re.search(r"\\(\\d{4}\\)$", old[5]))
+            new_has_year = bool(year)
+            if candidate[:5] > old[:5] or (new_has_year and not old_has_year):
+                seen[clean_name] = candidate
             return
-        seen[clean_name] = (source_rank, ratio, year_score, float(popularity or 0), display)
+        seen[clean_name] = candidate
 
     # Saved Movie Database Channel records are authoritative and appear first.
     try:
@@ -971,12 +973,14 @@ async def find_matching_titles(query):
     except Exception as exc:
         log.warning("Indexed title suggestions unavailable (%s)", type(exc).__name__)
 
+    # Ranking: exact title first, then closest spelling/title match, requested
+    # year, trusted catalogue source, and popularity as the final tie-breaker.
     ordered = sorted(
         seen.values(),
-        key=lambda row: (row[0], row[1], row[2], row[3]),
+        key=lambda row: (row[0], row[1], row[2], row[3], row[4]),
         reverse=True,
     )
-    return [display for _, _, _, _, display in ordered[:10]]
+    return [row[5] for row in ordered[:10]]
 
 
 async def title_details(kind, item):
