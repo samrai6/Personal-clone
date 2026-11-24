@@ -938,8 +938,16 @@ async def find_matching_titles(query):
     except Exception as exc:
         log.warning("Could not persist Internet suggestion titles (%s)", type(exc).__name__)
 
+    # If IMDb/OMDb found usable matches, do not mix in TMDb results.
+    if seen:
+        ordered = sorted(
+            seen.values(),
+            key=lambda row: (row[0], row[1], row[2], row[3], row[4], row[5]),
+            reverse=True,
+        )
+        return [row[6] for row in ordered[:10]]
 
-    # TMDB catalogue results.
+    # TMDB is the final online fallback.
     for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
         try:
             data = await tmdb_get(endpoint, {
