@@ -115,7 +115,7 @@ class MongoDatabaseConnection:
             # Support both parameterized queries and SQL with a literal key.
             key = params[0] if params else None
             if key is None:
-                match = re.search(r"\\bkey\\s*=\\s*'([^']*)'", sql, re.IGNORECASE)
+                match = re.search(r"\bkey\s*=\s*'([^']*)'", sql, re.IGNORECASE)
                 if match:
                     key = match.group(1)
             if key is None:
