@@ -632,6 +632,37 @@ async def find_external_suggestion_titles(query):
     except Exception as exc:
         log.warning("Wikidata suggestion search unavailable (%s)", type(exc).__name__)
 
+    # Google web results are available when a Programmable Search Engine is configured.
+    google_key = os.getenv("GOOGLE_CSE_API_KEY", "").strip()
+    google_cx = os.getenv("GOOGLE_CSE_ID", "").strip()
+    if google_key and google_cx:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.get(
+                    "https://www.googleapis.com/customsearch/v1",
+                    params={
+                        "key": google_key,
+                        "cx": google_cx,
+                        "q": f"{search_title} movie film web series TV series",
+                        "num": 10,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+            for item in data.get("items", []):
+                name = (item.get("title") or "").strip()
+                if not name:
+                    continue
+                text_to_check = name + " " + (item.get("snippet") or "")
+                year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", text_to_check)
+                results.append({
+                    "title": name,
+                    "year": year_match.group(1) if year_match else "",
+                    "source": "google",
+                })
+        except Exception as exc:
+            log.warning("Google Custom Search unavailable (%s)", type(exc).__name__)
+
     return results
 
 
@@ -814,6 +845,11 @@ async def find_matching_titles(query):
 
     # Search additional Internet catalogues and persist their title/year suggestions.
     external_titles = await find_external_suggestion_titles(search_title)
+    # Discard unrelated web-page titles before storing them in the suggestion index.
+    external_titles = [
+        item for item in external_titles
+        if title_similarity(search_title, item.get("title") or "") >= 0.45
+    ]
     try:
         save_indexed_suggestion_titles(external_titles)
     except Exception as exc:
