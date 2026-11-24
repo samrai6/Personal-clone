@@ -102,6 +102,8 @@ class MongoDatabaseConnection:
         self.client.admin.command("ping")
         self.settings = self.db["settings"]
         self.relay_map = self.db["relay_map"]
+        self.movies = self.db["movie_posts"]
+        self.movies.create_index("title_base")
 
     def execute(self, sql, params=()):
         normalized = " ".join(sql.lower().split())
@@ -182,6 +184,80 @@ def get_source_channel():
     with db_connect() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key='source_channel_id'").fetchone()
     return int(row[0]) if row else None
+
+
+def get_database_channel():
+    with db_connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key='movie_database_channel_id'").fetchone()
+    return int(row[0]) if row else None
+
+
+def set_database_channel(chat_id):
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES('movie_database_channel_id', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(chat_id),),
+        )
+
+
+def normalize_movie_key(value):
+    return re.sub(r"[^a-z0-9]+", "", (value or "").casefold())
+
+
+def save_movie_post(message):
+    caption = (message.caption or message.text or "").strip()
+    if not caption:
+        return False
+    first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
+    first_line = re.sub(r"<[^>]+>", "", first_line)
+    first_line = re.sub(r"^[^\\w(]+", "", first_line).strip()
+    title = first_line
+    title_base = normalize_movie_key(clean_search_title(title))
+    if not title_base:
+        return False
+    year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", title)
+    year = year_match.group(1) if year_match else ""
+    photo_file_id = message.photo[-1].file_id if message.photo else None
+    record = {
+        "title": title,
+        "title_base": title_base,
+        "year": year,
+        "caption": caption,
+        "photo_file_id": photo_file_id,
+        "channel_id": int(message.chat_id),
+        "message_id": int(message.message_id),
+        "updated_at": datetime.utcnow(),
+    }
+    with db_connect() as conn:
+        if not hasattr(conn, "movies"):
+            raise RuntimeError("Movie Channel storage requires the configured MongoDB connection.")
+        conn.movies.update_one(
+            {"title_base": title_base, "year": year},
+            {"$set": record},
+            upsert=True,
+        )
+    return True
+
+
+def find_saved_movie(query):
+    query_title = clean_search_title(query)
+    title_base = normalize_movie_key(query_title)
+    if not title_base:
+        return None
+    year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", query)
+    year = year_match.group(1) if year_match else ""
+    with db_connect() as conn:
+        if not hasattr(conn, "movies"):
+            return None
+        if year:
+            found = conn.movies.find_one({"title_base": title_base, "year": year})
+            if found:
+                return found
+        return conn.movies.find_one(
+            {"title_base": title_base},
+            sort=[("updated_at", -1)],
+        )
 
 
 def is_ai_enabled():
@@ -495,6 +571,19 @@ async def show_movie(message, query, group_check=False):
         await show_title_suggestions(message, query)
         return
 
+    # User-managed Telegram Movie Database is checked before online APIs.
+    try:
+        saved = find_saved_movie(query)
+        if saved:
+            await message.get_bot().copy_message(
+                chat_id=message.chat_id,
+                from_chat_id=saved["channel_id"],
+                message_id=saved["message_id"],
+            )
+            return True
+    except Exception as exc:
+        log.warning("Movie database lookup/copy failed; falling back to APIs (%s)", type(exc).__name__)
+
     result = None
     try:
         result = await find_title(query)
@@ -604,10 +693,22 @@ async def accept_source_forward(update: Update, context: ContextTypes.DEFAULT_TY
     message = update.effective_message
     if not message or update.effective_user.id != OWNER_ID:
         return
-    if not context.user_data.get("waiting_for_source_channel"):
-        return
     origin = message.forward_origin
     source_chat = getattr(origin, "chat", None) if origin else None
+    if context.user_data.get("waiting_for_database_channel"):
+        if not source_chat or source_chat.type != "channel":
+            await reply_text_auto(message, "ದಯವಿಟ್ಟು Movie Database Channel‌ನ original post ಅನ್ನು Forward ಮಾಡಿ.")
+            return
+        set_database_channel(source_chat.id)
+        context.user_data.pop("waiting_for_database_channel", None)
+        await reply_text_auto(
+            message,
+            f"✅ Movie Database Channel set ಆಯಿತು.\\nChannel ID: <code>{source_chat.id}</code>\\nBotಗೆ ಆ Channelನಲ್ಲಿ Admin permission ಕೊಡು.",
+            parse_mode="HTML",
+        )
+        return
+    if not context.user_data.get("waiting_for_source_channel"):
+        return
     if not source_chat or source_chat.type != "channel":
         await reply_text_auto(message, "ದಯವಿಟ್ಟು Channel‌ನ original post ಅನ್ನು Forward ಮಾಡಿ.")
         return
@@ -701,6 +802,32 @@ async def send_owner_reply_to_user(message, user_id, context):
         message_id=message.message_id,
     )
     asyncio.create_task(delete_later(context.bot, user_id, copied.message_id, 600))
+
+
+async def movie_database_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.channel_post
+    if not message or message.chat_id != get_database_channel():
+        return
+    try:
+        saved = save_movie_post(message)
+        if saved:
+            log.info("Movie database entry saved/updated: channel=%s message=%s", message.chat_id, message.message_id)
+    except Exception as exc:
+        log.exception("Could not save movie database post (%s)", type(exc).__name__)
+
+
+async def mdb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    if not message or update.effective_user.id != OWNER_ID:
+        return
+    current = get_database_channel()
+    status = f"Current Movie Database Channel: <code>{current}</code>" if current else "Movie Database Channel ಇನ್ನೂ set ಆಗಿಲ್ಲ."
+    context.user_data["waiting_for_database_channel"] = True
+    await reply_text_auto(
+        message,
+        f"<b>Movie Database Settings</b>\\n{status}\\n\\nನಿನ್ನ Movie Database Channel‌ನ ಒಂದು original post ಅನ್ನು ಇಲ್ಲಿ Forward ಮಾಡು.\\n\\nಆ Channelಗೆ bot ಅನ್ನು Admin ಮಾಡಬೇಕು.",
+        parse_mode="HTML",
+    )
 
 
 async def source_channel_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -934,6 +1061,7 @@ def main():
     app.add_handler(CommandHandler("ai", ai_command))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("fs", fs_command))
+    app.add_handler(CommandHandler("mdb", mdb_command))
     app.add_handler(CallbackQueryHandler(fs_callback, pattern=r"^fs:"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.FORWARDED, accept_source_forward), group=-1)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, private_reply))
@@ -941,6 +1069,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.REPLY, source_discussion_reply), group=-1)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, source_channel_reply))
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_database_channel_post), group=1)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
