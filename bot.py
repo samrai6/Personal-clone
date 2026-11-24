@@ -258,7 +258,7 @@ def apply_saved_ott_info(provider_lines, saved):
         }
 
     current_date = next(
-        (line.split(":", 1)[1].strip() for line in lines if line.startswith("India OTT Release Date:")),
+        (line.split(":", 1)[1].strip() for line in lines if line.startswith("First OTT Release Date:")),
         "",
     )
     # Use the database date only when TMDB/IMDb has no OTT release date.
@@ -269,7 +269,7 @@ def apply_saved_ott_info(provider_lines, saved):
     output = []
     date_line_added = False
     for line in lines:
-        if line.startswith("India OTT Release Date:"):
+        if line.startswith("First OTT Release Date:"):
             if not date_line_added and not fallback_date:
                 output.append(line)
             date_line_added = True
@@ -281,9 +281,9 @@ def apply_saved_ott_info(provider_lines, saved):
 
     # Add the MongoDB OTT date at the end, without replacing provider platform data.
     if fallback_date:
-        output.append("India OTT Release Date: " + fallback_date)
+        output.append("First OTT Release Date: " + fallback_date)
     elif not date_line_added:
-        output.append("India OTT Release Date: " + (current_date or "Not Announced Yet"))
+        output.append("First OTT Release Date: " + (current_date or "Not Announced Yet"))
 
     if not any(line.startswith("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ:") for line in output):
         value = fallback_date or (current_date if not is_missing(current_date) else "ಬಂದಿಲ್ಲ")
@@ -913,24 +913,46 @@ async def title_details(kind, item):
 
 
 async def release_and_ott(kind, item_id):
-    """Return India-only theatrical/first-air and streaming availability."""
+    """Return India theatrical/first-air date, India platforms, and earliest worldwide digital release."""
     release_lines, provider_lines = [], []
-    india_ott_date = "Not Announced Yet"
+    first_ott_date = "Not Announced Yet"
     if kind == "movie":
         try:
             data = await tmdb_get(f"/movie/{item_id}/release_dates")
+            all_digital_dates = []
+            for country in data.get("results", []):
+                for entry in country.get("release_dates", []):
+                    value = entry.get("release_date", "")
+                    if entry.get("type") == 4 and value:
+                        try:
+                            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                            all_digital_dates.append(parsed)
+                        except ValueError:
+                            continue
+            if all_digital_dates:
+                first_ott_date = min(all_digital_dates).strftime("%Y-%m-%d")
+
             india = next((row for row in data.get("results", []) if row.get("iso_3166_1") == "IN"), {})
-            dates = india.get("release_dates", [])
-            theatrical = sorted({x.get("release_date", "")[:10] for x in dates if x.get("type") == 3 and x.get("release_date")})
-            digital = sorted({x.get("release_date", "")[:10] for x in dates if x.get("type") == 4 and x.get("release_date")})
-            release_lines.append("India Theatrical Release Date: " + (format_tmdb_date(theatrical[0]) if theatrical else "Not Announced Yet"))
-            if digital:
-                india_ott_date = digital[0]
+            theatrical = sorted({
+                x.get("release_date", "")[:10]
+                for x in india.get("release_dates", [])
+                if x.get("type") == 3 and x.get("release_date")
+            })
+            release_lines.append(
+                "India Theatrical Release Date: " +
+                (format_tmdb_date(theatrical[0]) if theatrical else "Not Announced Yet")
+            )
         except Exception as exc:
-            log.warning("India release-date lookup unavailable (%s)", type(exc).__name__)
+            log.warning("Release-date lookup unavailable (%s)", type(exc).__name__)
             release_lines.append("🇮🇳 India Theatrical Release Date: Not Announced Yet")
     else:
         release_lines.append("🇮🇳 India First Air Date: Not Announced Yet")
+        try:
+            data = await tmdb_get(f"/tv/{item_id}/content_ratings")
+            # TV first digital dates are not consistently exposed by TMDb.
+        except Exception:
+            pass
+
     try:
         data = await tmdb_get(f"/{kind}/{item_id}/watch/providers")
         india = (data.get("results") or {}).get("IN") or {}
@@ -941,16 +963,112 @@ async def release_and_ott(kind, item_id):
                 if name and name not in names:
                     names.append(name)
         provider_lines.append("India OTT Platform: " + (", ".join(names) if names else "Not Announced Yet"))
-        display_ott_date = format_tmdb_date(india_ott_date) if india_ott_date != "Not Announced Yet" else "ಬಂದಿಲ್ಲ"
-        provider_lines.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + display_ott_date)
-        provider_lines.append("India OTT Release Date: " + (format_tmdb_date(india_ott_date) if india_ott_date != "Not Announced Yet" else "Not Announced Yet"))
     except Exception as exc:
-        log.warning("India OTT lookup unavailable (%s)", type(exc).__name__)
+        log.warning("India OTT platform lookup unavailable (%s)", type(exc).__name__)
         provider_lines.append("India OTT Platform: Not Announced Yet")
-        display_ott_date = format_tmdb_date(india_ott_date) if india_ott_date != "Not Announced Yet" else "ಬಂದಿಲ್ಲ"
-        provider_lines.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + display_ott_date)
-        provider_lines.append("India OTT Release Date: " + (format_tmdb_date(india_ott_date) if india_ott_date != "Not Announced Yet" else "Not Announced Yet"))
+
+    display_ott_date = format_tmdb_date(first_ott_date) if first_ott_date != "Not Announced Yet" else "ಬಂದಿಲ್ಲ"
+    provider_lines.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + display_ott_date)
+    provider_lines.append("First OTT Release Date: " + (
+        format_tmdb_date(first_ott_date) if first_ott_date != "Not Announced Yet" else "Not Announced Yet"
+    ))
     return release_lines, provider_lines
+
+
+async def find_tavily_worldwide_ott_date(title, year=""):
+    """Research the earliest worldwide OTT/digital release date only."""
+    if not TAVILY_API_KEY:
+        return None
+    query = f'"{title}" {year} first worldwide OTT streaming digital release date'.strip()
+    payload = {
+        "api_key": TAVILY_API_KEY,
+        "query": query,
+        "topic": "general",
+        "search_depth": "advanced",
+        "max_results": 8,
+        "include_answer": True,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post("https://api.tavily.com/search", json=payload)
+            response.raise_for_status()
+            data = response.json()
+    except Exception as exc:
+        log.warning("Tavily worldwide OTT date research unavailable (%s)", type(exc).__name__)
+        return None
+
+    texts = []
+    if data.get("answer"):
+        texts.append(str(data["answer"]))
+    for result in data.get("results", []):
+        content = result.get("content") or ""
+        title_text = result.get("title") or ""
+        if content:
+            texts.append(str(title_text) + ". " + str(content))
+
+    date_patterns = (
+        r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b",
+        r"\b(\d{1,2})[./-](\d{1,2})[./-](20\d{2})\b",
+        r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b",
+        r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(20\d{2})\b",
+    )
+    month_map = {name.lower(): index for index, name in enumerate(
+        ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"), 1
+    )}
+    candidates = []
+    for text in texts:
+        for sentence in re.split(r"(?<=[.!?])\s+|\n", text):
+            lowered = sentence.casefold()
+            if not any(term in lowered for term in ("ott", "stream", "digital", "premiere", "available on", "released on")):
+                continue
+            if any(term in lowered for term in ("theatrical release", "in theatres", "in theaters", "cinema release", "world premiere at")):
+                continue
+            for pattern in date_patterns:
+                match = re.search(pattern, sentence, re.IGNORECASE)
+                if not match:
+                    continue
+                try:
+                    if pattern == date_patterns[0]:
+                        date_value = datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+                    elif pattern == date_patterns[1]:
+                        day, month, year_value = match.groups()
+                        date_value = datetime(int(year_value), int(month), int(day))
+                    elif pattern == date_patterns[2]:
+                        day, month_name, year_value = match.groups()
+                        date_value = datetime(int(year_value), month_map[month_name.lower()], int(day))
+                    else:
+                        month_name, day, year_value = match.groups()
+                        date_value = datetime(int(year_value), month_map[month_name.lower()], int(day))
+                    if year and date_value.year < int(year):
+                        continue
+                    candidates.append(date_value)
+                except (ValueError, TypeError):
+                    continue
+    return min(candidates).strftime("%d-%m-%Y") if candidates else None
+
+
+async def apply_tavily_ott_date(details, provider_lines):
+    """Fill only the worldwide first OTT release date when TMDb has no date."""
+    current = next(
+        (line.split(":", 1)[1].strip() for line in (provider_lines or [])
+         if line.startswith("First OTT Release Date:")),
+        "Not Announced Yet",
+    )
+    missing = {"", "not announced yet", "not available", "n/a", "ಬಂದಿಲ್ಲ"}
+    if current.casefold() not in missing:
+        return provider_lines
+    found = await find_tavily_worldwide_ott_date(details.get("title", ""), details.get("year", ""))
+    if not found:
+        return provider_lines
+    updated = []
+    for line in provider_lines or []:
+        if line.startswith("First OTT Release Date:"):
+            updated.append("First OTT Release Date: " + found)
+        elif line.startswith("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ:"):
+            updated.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + found)
+        else:
+            updated.append(line)
+    return updated
 
 async def find_tavily_india_ott_date(title, year=""):
     """Research only the India OTT release date; never use Tavily for posters/details/suggestions."""
@@ -1030,7 +1148,7 @@ async def apply_tavily_ott_date(details, provider_lines):
     """Replace only the India OTT Release Date line when Tavily finds a credible date."""
     current = next(
         (line.split(":", 1)[1].strip() for line in (provider_lines or [])
-         if line.startswith("India OTT Release Date:")),
+         if line.startswith("First OTT Release Date:")),
         "Not Announced Yet",
     )
     missing = {"", "not announced yet", "not available", "n/a", "ಬಂದಿಲ್ಲ"}
@@ -1041,8 +1159,8 @@ async def apply_tavily_ott_date(details, provider_lines):
         return provider_lines
     updated = []
     for line in provider_lines or []:
-        if line.startswith("India OTT Release Date:"):
-            updated.append("India OTT Release Date: " + found)
+        if line.startswith("First OTT Release Date:"):
+            updated.append("First OTT Release Date: " + found)
         elif line.startswith("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ:"):
             updated.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + found)
         else:
@@ -1159,7 +1277,7 @@ async def show_movie(message, query, group_check=False, confirmed=False):
         provider_lines = await apply_tavily_ott_date(details, [
             "India OTT Platform: Not Available from IMDb",
             "📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: ಬಂದಿಲ್ಲ",
-            "India OTT Release Date: Not Announced Yet",
+            "First OTT Release Date: Not Announced Yet",
         ])
         provider_lines = apply_saved_ott_info(provider_lines, saved)
     lines = [
