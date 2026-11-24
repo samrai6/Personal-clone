@@ -654,7 +654,7 @@ async def find_external_suggestion_titles(query):
                 if not name:
                     continue
                 text_to_check = name + " " + (item.get("snippet") or "")
-                year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", text_to_check)
+                year_match = re.search(r"\b((?:19|20)\d{2})\b", text_to_check)
                 results.append({
                     "title": name,
                     "year": year_match.group(1) if year_match else "",
