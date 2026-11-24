@@ -229,44 +229,65 @@ def extract_ott_info(caption):
 
 
 def apply_saved_ott_info(provider_lines, saved):
-    """Prefer manually verified India OTT data from MongoDB over incomplete TMDB data."""
-    if not saved:
-        return provider_lines
-    platform = saved.get("ott_platform")
-    release_date = saved.get("ott_release_date")
-    if not platform and not release_date:
-        return provider_lines
-
+    """Use MongoDB OTT data only when TMDB/IMDb has no India OTT value."""
     lines = list(provider_lines or [])
-    platform_line = "India OTT Platform: " + (platform or "Not Announced Yet")
-    date_line = "India OTT Release Date: " + (release_date or "Not Announced Yet")
-    telegram_line = "📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + (release_date or "ಬಂದಿಲ್ಲ")
+    saved = saved or {}
 
-    replaced = set()
+    def is_missing(value):
+        return not value or value.strip().casefold() in {
+            "not announced yet",
+            "not available",
+            "not available from imdb",
+            "n/a",
+            "ಬಂದಿಲ್ಲ",
+        }
+
+    current_platform = next(
+        (line.split(":", 1)[1].strip() for line in lines if line.startswith("India OTT Platform:")),
+        "",
+    )
+    current_date = next(
+        (line.split(":", 1)[1].strip() for line in lines if line.startswith("India OTT Release Date:")),
+        "",
+    )
+
+    # Prefer live TMDB/IMDb values. Use the manually saved database value
+    # only as a fallback when the API has no value for that field.
+    platform = current_platform
+    if is_missing(platform) and not is_missing(saved.get("ott_platform")):
+        platform = saved["ott_platform"].strip()
+
+    release_date = current_date
+    if is_missing(release_date) and not is_missing(saved.get("ott_release_date")):
+        release_date = saved["ott_release_date"].strip()
+
     output = []
+    platform_added = False
+    date_added = False
+    telegram_added = False
     for line in lines:
         if line.startswith("India OTT Platform:"):
-            if "platform" not in replaced:
-                output.append(platform_line)
-                replaced.add("platform")
+            if not platform_added:
+                output.append("India OTT Platform: " + (platform or "Not Announced Yet"))
+                platform_added = True
         elif line.startswith("India OTT Release Date:"):
-            if "date" not in replaced:
-                output.append(date_line)
-                replaced.add("date")
+            if not date_added:
+                output.append("India OTT Release Date: " + (release_date or "Not Announced Yet"))
+                date_added = True
         elif line.startswith("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ:"):
-            if "telegram" not in replaced:
-                output.append(telegram_line)
-                replaced.add("telegram")
+            if not telegram_added:
+                output.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + (release_date if not is_missing(release_date) else "ಬಂದಿಲ್ಲ"))
+                telegram_added = True
         else:
             output.append(line)
-    if "platform" not in replaced:
-        output.insert(0, platform_line)
-    if "telegram" not in replaced:
-        output.append(telegram_line)
-    if "date" not in replaced:
-        output.append(date_line)
-    return output
 
+    if not platform_added:
+        output.insert(0, "India OTT Platform: " + (platform or "Not Announced Yet"))
+    if not telegram_added:
+        output.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + (release_date if not is_missing(release_date) else "ಬಂದಿಲ್ಲ"))
+    if not date_added:
+        output.append("India OTT Release Date: " + (release_date or "Not Announced Yet"))
+    return output
 
 def save_movie_post(message):
     caption = (message.caption or message.text or "").strip()
