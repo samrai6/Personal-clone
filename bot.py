@@ -590,7 +590,7 @@ async def find_external_suggestion_titles(query):
             kind = (item.get("Type") or "").lower()
             if kind not in {"movie", "series"}:
                 continue
-            year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", item.get("Year") or "")
+            year_match = re.search(r"\b((?:19|20)\\d{2})\\b", item.get("Year") or "")
             results.append({
                 "title": (item.get("Title") or "").strip(),
                 "year": year_match.group(1) if year_match else "",
@@ -623,7 +623,7 @@ async def find_external_suggestion_titles(query):
                 "animated series", "miniseries", "television program",
             )):
                 continue
-            year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", description)
+            year_match = re.search(r"\b((?:19|20)\\d{2})\\b", description)
             results.append({
                 "title": name,
                 "year": year_match.group(1) if year_match else "",
@@ -664,9 +664,9 @@ async def find_external_suggestion_titles(query):
                 if not query_key or query_key not in title_key:
                     continue
 
-                year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", page_title)
+                year_match = re.search(r"\b((?:19|20)\\d{2})\\b", page_title)
                 if not year_match:
-                    year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", content)
+                    year_match = re.search(r"\b((?:19|20)\\d{2})\\b", content)
                 results.append({
                     "title": page_title,
                     "year": year_match.group(1) if year_match else "",
@@ -700,7 +700,7 @@ async def find_external_suggestion_titles(query):
                 if not name:
                     continue
                 text_to_check = name + " " + (item.get("snippet") or "")
-                year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", text_to_check)
+                year_match = re.search(r"\b((?:19|20)\\d{2})\\b", text_to_check)
                 results.append({
                     "title": name,
                     "year": year_match.group(1) if year_match else "",
