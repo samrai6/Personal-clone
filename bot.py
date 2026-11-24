@@ -46,6 +46,7 @@ async def react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = 1315244338
 MOVIE_DATABASE_CHANNEL_ID = -1004402999657
+SUGGESTION_DATABASE_CHANNEL_ID = -1004319588685
 DELETE_CHANNEL_ID = -1004392593374
 # TMDB Read Access Token from Ironman poster plugin.
 TMDB_BEARER_TOKEN = os.getenv("TMDB_BEARER_TOKEN", "").strip()
@@ -107,9 +108,12 @@ class MongoDatabaseConnection:
         self.relay_map = self.db["relay_map"]
         self.movies = self.db["movie_posts"]
         self.movies.create_index("title_base")
-        # Internet-discovered suggestion titles are isolated from manually managed movie posts.
+        # Internet-discovered suggestion titles and channel-managed suggestion titles
+        # remain separate from the photo/details movie database.
         self.title_index = self.db["title_index"]
         self.title_index.create_index([("title_base", 1), ("year", 1)], unique=True)
+        self.suggestions = self.db["suggestion_titles"]
+        self.suggestions.create_index([("title_base", 1), ("year", 1)], unique=True)
 
     def execute(self, sql, params=()):
         normalized = " ".join(sql.lower().split())
@@ -316,6 +320,39 @@ def apply_saved_theatrical_date(release_lines, saved):
 
     lines.append("Theatrical Release Date: " + saved_date)
     return lines
+
+
+def save_suggestion_post(message):
+    """Save title-only suggestion entries from the dedicated Telegram channel."""
+    caption = (message.caption or message.text or "").strip()
+    if not caption:
+        return False
+    first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
+    first_line = re.sub(r"<[^>]+>", "", first_line)
+    first_line = re.sub(r"^[^\w(]+", "", first_line).strip()
+    first_line = re.sub(r"\s+", " ", first_line)
+    year_match = re.search(r"\b((?:19|20)\d{2})\b", first_line)
+    year = year_match.group(1) if year_match else ""
+    title = re.sub(r"\s*[-–—:]?\s*\(?\b(?:19|20)\d{2}\)?\s*$", "", first_line).strip()
+    title_base = normalize_movie_key(clean_search_title(title))
+    if not title_base:
+        return False
+    with db_connect() as conn:
+        if not hasattr(conn, "suggestions"):
+            raise RuntimeError("Suggestion Channel storage requires the configured MongoDB connection.")
+        conn.suggestions.update_one(
+            {"title_base": title_base, "year": year},
+            {"$set": {
+                "title": title,
+                "title_base": title_base,
+                "year": year,
+                "channel_id": int(message.chat_id),
+                "message_id": int(message.message_id),
+                "updated_at": datetime.utcnow(),
+            }},
+            upsert=True,
+        )
+    return True
 
 
 def save_movie_post(message):
@@ -825,6 +862,17 @@ async def find_matching_titles(query):
                     add_match(clean_search_title(saved_title), saved_year, 0, source_rank=1, force_exact=exact_db_match)
     except Exception as exc:
         log.warning("Saved movie suggestions unavailable (%s)", type(exc).__name__)
+
+    # Dedicated Suggestion Database Channel: title/year only, no posters or details.
+    try:
+        with db_connect() as conn:
+            if hasattr(conn, "suggestions"):
+                for item in conn.suggestions.find({}, {"title": 1, "year": 1}):
+                    title = clean_candidate(item.get("title") or "")
+                    if valid_title(title):
+                        add_match(title, str(item.get("year") or ""), 0, source_rank=3)
+    except Exception as exc:
+        log.warning("Suggestion Channel titles unavailable (%s)", type(exc).__name__)
 
     # TMDB catalogue results.
     for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
@@ -1382,6 +1430,18 @@ async def movie_database_channel_post(update: Update, context: ContextTypes.DEFA
         log.exception("Could not save movie database post (%s)", type(exc).__name__)
 
 
+async def suggestion_database_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.channel_post
+    if not message or message.chat_id != SUGGESTION_DATABASE_CHANNEL_ID:
+        return
+    try:
+        saved = save_suggestion_post(message)
+        if saved:
+            log.info("Suggestion title saved: channel=%s message=%s", message.chat_id, message.message_id)
+    except Exception as exc:
+        log.exception("Could not save suggestion channel post (%s)", type(exc).__name__)
+
+
 async def movie_ott_update_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.channel_post
     if not message or message.chat_id != DELETE_CHANNEL_ID:
@@ -1681,7 +1741,8 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, source_channel_reply))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_database_channel_post), group=1)
-    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_ott_update_channel_post), group=2)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, suggestion_database_channel_post), group=2)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_ott_update_channel_post), group=3)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
