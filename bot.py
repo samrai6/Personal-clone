@@ -1455,6 +1455,10 @@ async def suggestion_database_channel_post(update: Update, context: ContextTypes
         saved_count = save_suggestion_post(message)
         if saved_count:
             log.info("Suggestion titles saved: count=%s channel=%s message=%s", saved_count, message.chat_id, message.message_id)
+            await context.bot.send_message(
+                chat_id=message.chat_id,
+                text=f"✅ {saved_count} Movies Successfully Saved to Suggestion Database!",
+            )
     except Exception as exc:
         log.exception("Could not save suggestion channel post (%s)", type(exc).__name__)
 
