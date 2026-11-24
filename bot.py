@@ -838,44 +838,67 @@ async def find_title(query):
 async def find_matching_titles(query):
     """Return clean, relevant movie/series titles; saved Movie Channel entries rank first."""
     matches = []
-    seen = set()
+    seen = {}
     search_title = clean_search_title(query)
-    requested_year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", query)
+    requested_year_match = re.search(r"\b((?:19|20)\d{2})\b", query)
     requested_year = requested_year_match.group(1) if requested_year_match else None
 
     blocked_phrases = (
         "wikipedia", "rotten tomatoes", "the movie database", "tmdb", "imdb",
-        "full movie", "blockbuster", "official trailer", "film series",
-        "movie series", "watch online", "review", "explained", "cast:",
+        "tv guide", "where to watch", "watch and stream", "full movie",
+        "blockbuster", "official trailer", "film series", "movie series",
+        "review", "explained", "cast:",
     )
 
-    def valid_title(name):
-        name = re.sub(r"\\s+", " ", str(name or "")).strip(" \\t-–—|")
+    def clean_candidate(value):
+        name = re.sub(r"\s+", " ", str(value or "")).strip()
+        # Remove common search-engine/site suffixes instead of treating them as titles.
+        name = re.sub(
+            r"\s*(?:[-|–—:]\s*)?(?:where to watch(?: and stream)?|watch and stream|"
+            r"streaming guide|movie review|official trailer|full movie).*$",
+            "",
+            name,
+            flags=re.IGNORECASE,
+        ).strip(" \t-–—|:")
+        return name
+
+    def valid_title(value):
+        name = clean_candidate(value)
         lowered = name.casefold()
-        if not name or len(name) > 85 or any(x in lowered for x in blocked_phrases):
+        if not name or len(name) > 85:
             return False
-        if any(ch in name for ch in ("|", "\\n", "\\r", "http://", "https://")):
+        if any(term in lowered for term in blocked_phrases):
             return False
-        # Reject sentence-like snippets while allowing genuine punctuation in titles.
-        if len(name.split()) > 9 or re.search(r"\\b(is an|are the|movie review|release date|where to watch)\\b", lowered):
+        if any(ch in name for ch in ("|", "\n", "\r", "http://", "https://")):
+            return False
+        if len(name.split()) > 9 or re.search(
+            r"\b(is an|are the|movie review|release date|where to watch)\b", lowered
+        ):
             return False
         return True
 
     def add_match(name, year="", popularity=0.0, source_rank=0):
+        name = clean_candidate(name)
         if not valid_title(name):
             return
-        name = re.sub(r"\\s+", " ", str(name)).strip()
         clean_name = re.sub(r"[^a-z0-9]+", "", name.casefold())
-        key = (clean_name, str(year or ""))
-        if key in seen:
+        if not clean_name:
             return
-        ratio = title_similarity(search_title, clean_search_title(name))
+        ratio = title_similarity(search_title, name)
         if ratio < 0.45:
             return
-        seen.add(key)
-        year_score = 1 if requested_year and str(year or "") == requested_year else 0
+        year = str(year or "")
+        year_score = 1 if requested_year and year == requested_year else 0
         display = f"{name} ({year})" if year else name
-        matches.append((source_rank, ratio, year_score, float(popularity or 0), display))
+        # Deduplicate by title alone; prefer the version that includes a year.
+        if clean_name in seen:
+            old = seen[clean_name]
+            if (year and not old[4].endswith(")")) or (
+                source_rank > old[0] and not old[4].endswith(")")
+            ):
+                seen[clean_name] = (source_rank, ratio, year_score, float(popularity or 0), display)
+            return
+        seen[clean_name] = (source_rank, ratio, year_score, float(popularity or 0), display)
 
     # Saved Movie Database Channel records are authoritative and appear first.
     try:
@@ -885,7 +908,7 @@ async def find_matching_titles(query):
                     saved_title = (saved.get("title") or "").strip()
                     saved_year = str(saved.get("year") or "")
                     if not saved_year:
-                        year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", saved_title)
+                        year_match = re.search(r"\b((?:19|20)\d{2})\b", saved_title)
                         saved_year = year_match.group(1) if year_match else ""
                     add_match(clean_search_title(saved_title), saved_year, 0, source_rank=3)
     except Exception as exc:
@@ -907,7 +930,7 @@ async def find_matching_titles(query):
         except Exception as exc:
             log.warning("TMDB suggestions unavailable for %s (%s)", kind, type(exc).__name__)
 
-    # Internet discovery is only supplementary; reject page headlines/snippets.
+    # Internet discovery is supplementary; page headlines are not movie titles.
     try:
         external_titles = await find_external_suggestion_titles(search_title)
     except Exception as exc:
@@ -915,28 +938,32 @@ async def find_matching_titles(query):
         external_titles = []
     clean_external = []
     for item in external_titles:
-        title = item.get("title") or ""
-        if valid_title(title) and title_similarity(search_title, clean_search_title(title)) >= 0.45:
-            clean_external.append(item)
+        title = clean_candidate(item.get("title") or "")
+        if valid_title(title) and title_similarity(search_title, title) >= 0.45:
+            clean_external.append({**item, "title": title})
             add_match(title, item.get("year"), 0, source_rank=1)
     try:
         save_indexed_suggestion_titles(clean_external)
     except Exception as exc:
         log.warning("Could not persist Internet suggestion titles (%s)", type(exc).__name__)
 
-    # Previously indexed results are filtered again so old bad entries cannot leak.
+    # Previously indexed records are filtered again; duplicates merge by title.
     try:
         with db_connect() as conn:
             if hasattr(conn, "title_index"):
                 for indexed in conn.title_index.find({}, {"title": 1, "year": 1}):
-                    title = (indexed.get("title") or "").strip()
+                    title = clean_candidate(indexed.get("title") or "")
                     if valid_title(title):
                         add_match(title, str(indexed.get("year") or ""), 0, source_rank=1)
     except Exception as exc:
         log.warning("Indexed title suggestions unavailable (%s)", type(exc).__name__)
 
-    matches.sort(key=lambda row: (row[0], row[1], row[2], row[3]), reverse=True)
-    return [display for _, _, _, _, display in matches[:10]]
+    ordered = sorted(
+        seen.values(),
+        key=lambda row: (row[0], row[1], row[2], row[3]),
+        reverse=True,
+    )
+    return [display for _, _, _, _, display in ordered[:10]]
 
 
 async def title_details(kind, item):
