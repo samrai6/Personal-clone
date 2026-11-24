@@ -296,8 +296,6 @@ async def find_imdb_details(query):
     search_title = clean_search_title(query)
     requested_year = re.search(r"\\b((?:19|20)\\d{2})\\b", query)
     params = {"s": search_title, "page": 1}
-    if requested_year:
-        params["y"] = requested_year.group(1)
     results = await omdb_get(params)
     if not results:
         return None
@@ -510,8 +508,12 @@ async def show_movie(message, query, group_check=False):
         clean_query = re.sub(r"[^a-z0-9]+", "", clean_search_title(query).casefold())
         clean_title = re.sub(r"[^a-z0-9]+", "", (matched_title or "").casefold())
         if clean_query and clean_query == clean_title:
-            details = await title_details(kind, item)
-            release_lines, provider_lines = await release_and_ott(kind, item["id"])
+            try:
+                details = await title_details(kind, item)
+                release_lines, provider_lines = await release_and_ott(kind, item["id"])
+            except Exception as exc:
+                log.warning("TMDB details unavailable; trying IMDb fallback (%s)", type(exc).__name__)
+                details = None
 
     # If TMDB has no exact match (or is unavailable), search IMDb via OMDb.
     if details is None:
