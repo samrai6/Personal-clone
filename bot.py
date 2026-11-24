@@ -783,12 +783,12 @@ async def find_title(query):
 
 
 async def find_matching_titles(query):
-    """Search local movie databases first; fall back to IMDb/OMDb, then TMDb."""
-    matches = []
-    seen = {}
+    """Combine suggestions in provider order: TMDb, local MongoDB, then OMDb."""
+    matches = {}
     search_title = clean_search_title(query)
-    requested_year_match = re.search(r"\b((?:19|20)\d{2})\b", query)
+    requested_year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", query)
     requested_year = requested_year_match.group(1) if requested_year_match else None
+    requested_key = normalize_movie_key(search_title)
 
     blocked_phrases = (
         "wikipedia", "rotten tomatoes", "the movie database", "tmdb", "imdb",
@@ -800,28 +800,23 @@ async def find_matching_titles(query):
     )
 
     def clean_candidate(value):
-        name = re.sub(r"\s+", " ", str(value or "")).strip()
-        # Remove common search-engine/site suffixes instead of treating them as titles.
+        name = re.sub(r"\\s+", " ", str(value or "")).strip()
         name = re.sub(
-            r"\s*(?:[-|–—:]\s*)?(?:where to watch(?: and stream)?|watch and stream|"
+            r"\\s*(?:[-|–—:]\\s*)?(?:where to watch(?: and stream)?|watch and stream|"
             r"streaming guide|movie review|official trailer|full movie).*$",
-            "",
-            name,
-            flags=re.IGNORECASE,
-        ).strip(" \t-–—|:")
+            "", name, flags=re.IGNORECASE,
+        ).strip(" \\t-–—|:")
         return name
 
     def valid_title(value):
         name = clean_candidate(value)
         lowered = name.casefold()
-        if not name or len(name) > 85:
+        if not name or len(name) > 85 or any(term in lowered for term in blocked_phrases):
             return False
-        if any(term in lowered for term in blocked_phrases):
-            return False
-        if any(ch in name for ch in ("|", "\n", "\r", "http://", "https://")):
+        if any(ch in name for ch in ("|", "\\n", "\\r", "http://", "https://")):
             return False
         if len(name.split()) > 9 or re.search(
-            r"\b(is an|are the|movie review|release date|where to watch)\b", lowered
+            r"\\b(is an|are the|movie review|release date|where to watch)\\b", lowered
         ):
             return False
         return True
@@ -830,143 +825,78 @@ async def find_matching_titles(query):
         name = clean_candidate(name)
         if not valid_title(name):
             return
-        clean_name = re.sub(r"[^a-z0-9]+", "", name.casefold())
-        if not clean_name:
+        key = normalize_movie_key(name)
+        if not key:
             return
         ratio = title_similarity(search_title, name)
-        # Exact normalized title always ranks above partial/close matches.
-        exact_score = 1 if normalize_movie_key(search_title) == normalize_movie_key(name) else 0
-        # Trust an exact MongoDB key even if display punctuation differs.
-        # Reject weakly related titles; this prevents unrelated results such as
-        # "Ramayana" from appearing for "Premada Oorali".
+        exact_score = 1 if requested_key == key else 0
         if ratio < 0.50 and not force_exact:
             return
         year = str(year or "")
+        year_number = int(year) if re.fullmatch(r"\\d{4}", year) else 0
         year_score = 1 if requested_year and year == requested_year else 0
-        year_number = int(year) if re.fullmatch(r"\d{4}", year) else 0
         display = f"{name} ({year})" if year else name
-        # For duplicate titles, keep the newest known release year.
         candidate = (exact_score, year_number, source_rank, ratio, year_score, float(popularity or 0), display)
-        if clean_name in seen:
-            old = seen[clean_name]
-            old_has_year = bool(old[1])
-            new_has_year = bool(year_number)
-            if candidate[:6] > old[:6] or (new_has_year and not old_has_year):
-                seen[clean_name] = candidate
-            return
-        seen[clean_name] = candidate
+        old = matches.get(key)
+        if old is None or candidate[:6] > old[:6]:
+            matches[key] = candidate
 
-    # Saved Movie Database Channel records are authoritative and appear first.
+    # 1) TMDb first: search both movies and TV series.
+    if TMDB_BEARER_TOKEN:
+        for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
+            try:
+                data = await tmdb_get(endpoint, {
+                    "query": search_title, "include_adult": "false", "page": 1,
+                })
+                for item in data.get("results", [])[:20]:
+                    name = item.get("title") if kind == "movie" else item.get("name")
+                    date = item.get("release_date") if kind == "movie" else item.get("first_air_date")
+                    add_match(name, date[:4] if date else "", item.get("popularity") or 0, source_rank=3)
+            except Exception as exc:
+                log.warning("TMDb suggestion search unavailable for %s (%s)", kind, type(exc).__name__)
+
+    # 2) MongoDB records: saved movie channel, suggestion channel, then indexed titles.
     try:
         with db_connect() as conn:
             if hasattr(conn, "movies"):
-                requested_key = normalize_movie_key(search_title)
                 for saved in conn.movies.find({}, {"title": 1, "title_base": 1, "year": 1, "caption": 1}):
                     saved_title = (saved.get("title") or "").strip()
                     if not saved_title and saved.get("caption"):
                         saved_title = next(
-                            (line.strip() for line in str(saved["caption"]).splitlines() if line.strip()),
-                            "",
+                            (line.strip() for line in str(saved["caption"]).splitlines() if line.strip()), ""
                         )
                         saved_title = re.sub(r"<[^>]+>", "", saved_title).strip()
                     saved_year = str(saved.get("year") or "")
                     if not saved_year:
-                        year_match = re.search(r"\b((?:19|20)\d{2})\b", saved_title)
+                        year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", saved_title)
                         saved_year = year_match.group(1) if year_match else ""
                     saved_key = str(saved.get("title_base") or normalize_movie_key(clean_search_title(saved_title)))
-                    # Exact normalized DB matches must never be lost because of punctuation
-                    # or minor display-title differences (e.g. K.G.F vs KGF).
-                    exact_db_match = bool(requested_key and saved_key == requested_key)
-                    add_match(clean_search_title(saved_title), saved_year, 0, source_rank=10, force_exact=exact_db_match)
-    except Exception as exc:
-        log.warning("Saved movie suggestions unavailable (%s)", type(exc).__name__)
-
-    # Dedicated Suggestion Database Channel: title/year only, no posters or details.
-    try:
-        with db_connect() as conn:
+                    add_match(
+                        clean_search_title(saved_title), saved_year, source_rank=2,
+                        force_exact=bool(requested_key and saved_key == requested_key),
+                    )
             if hasattr(conn, "suggestions"):
                 for item in conn.suggestions.find({}, {"title": 1, "year": 1}):
-                    title = clean_candidate(item.get("title") or "")
-                    if valid_title(title):
-                        add_match(title, str(item.get("year") or ""), 0, source_rank=10)
-    except Exception as exc:
-        log.warning("Suggestion Channel titles unavailable (%s)", type(exc).__name__)
-
-    # Check previously indexed local database records before calling online providers.
-    # Previously indexed records are filtered again; duplicates merge by title.
-    try:
-        with db_connect() as conn:
+                    add_match(item.get("title"), item.get("year"), source_rank=2)
             if hasattr(conn, "title_index"):
-                for indexed in conn.title_index.find({}, {"title": 1, "year": 1, "source": 1}):
-                    # Tavily/web-discovered page titles are not valid suggestion sources.
-                    if str(indexed.get("source") or "").lower() in {"wikidata", "tavily", "internet"}:
+                for item in conn.title_index.find({}, {"title": 1, "year": 1, "source": 1}):
+                    if str(item.get("source") or "").lower() in {"wikidata", "tavily", "internet"}:
                         continue
-                    title = clean_candidate(indexed.get("title") or "")
-                    if valid_title(title):
-                        add_match(title, str(indexed.get("year") or ""), 0, source_rank=2)
+                    add_match(item.get("title"), item.get("year"), source_rank=2)
     except Exception as exc:
-        log.warning("Indexed title suggestions unavailable (%s)", type(exc).__name__)
+        log.warning("MongoDB title suggestions unavailable (%s)", type(exc).__name__)
 
-
-    if seen:
-        ordered = sorted(
-            seen.values(),
-            key=lambda row: (row[0], row[1], row[2], row[3], row[4], row[5]),
-            reverse=True,
-        )
-        return [row[6] for row in ordered[:10]]
-
-    # Internet discovery is supplementary; page headlines are not movie titles.
+    # 3) OMDb last: merge its results with the TMDb and MongoDB results.
     try:
         external_titles = await find_external_suggestion_titles(search_title)
+        for item in external_titles:
+            add_match(item.get("title"), item.get("year"), source_rank=1)
+        save_indexed_suggestion_titles(external_titles)
     except Exception as exc:
-        log.warning("External title suggestions unavailable (%s)", type(exc).__name__)
-        external_titles = []
-    clean_external = []
-    for item in external_titles:
-        title = clean_candidate(item.get("title") or "")
-        if valid_title(title) and title_similarity(search_title, title) >= 0.55:
-            clean_external.append({**item, "title": title})
-            # Provider priority: TMDb > OMDb; web search is used only for OTT research.
-            provider_rank = {
-                "omdb": 6,
-                "tavily": 4,
-            }.get(str(item.get("source") or "").lower(), 3)
-            add_match(title, item.get("year"), 0, source_rank=provider_rank)
-    try:
-        save_indexed_suggestion_titles(clean_external)
-    except Exception as exc:
-        log.warning("Could not persist Internet suggestion titles (%s)", type(exc).__name__)
+        log.warning("OMDb suggestion search unavailable (%s)", type(exc).__name__)
 
-    # If IMDb/OMDb found usable matches, do not mix in TMDb results.
-    if seen:
-        ordered = sorted(
-            seen.values(),
-            key=lambda row: (row[0], row[1], row[2], row[3], row[4], row[5]),
-            reverse=True,
-        )
-        return [row[6] for row in ordered[:10]]
-
-    # TMDB is the final online fallback.
-    for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
-        try:
-            data = await tmdb_get(endpoint, {
-                "query": search_title,
-                "include_adult": "false",
-                "page": 1,
-            })
-            for item in data.get("results", [])[:20]:
-                name = item.get("title") if kind == "movie" else item.get("name")
-                date = item.get("release_date") if kind == "movie" else item.get("first_air_date")
-                year = date[:4] if date else ""
-                add_match(name, year, item.get("popularity") or 0, source_rank=7)
-        except Exception as exc:
-            log.warning("TMDB suggestions unavailable for %s (%s)", kind, type(exc).__name__)
-
-    # Ranking: exact title first, then newest release year; saved DB sources
-    # take priority over external providers when title/year are otherwise comparable.
     ordered = sorted(
-        seen.values(),
+        matches.values(),
         key=lambda row: (row[0], row[1], row[2], row[3], row[4], row[5]),
         reverse=True,
     )
