@@ -586,7 +586,7 @@ async def omdb_get(params):
 
 
 async def find_external_suggestion_titles(query):
-    """Search IMDb-backed OMDb, Wikidata and Tavily for additional movie/TV titles."""
+    """Search OMDb, Wikidata and Tavily for additional movie/TV titles."""
     search_title = clean_search_title(query)
     results = []
 
@@ -685,36 +685,6 @@ async def find_external_suggestion_titles(query):
     else:
         log.info("Tavily suggestion search skipped: TAVILY_API_KEY is not configured")
 
-    # Google Custom Search remains optional when both credentials are configured.
-    google_key = os.getenv("GOOGLE_CSE_API_KEY", "").strip()
-    google_cx = os.getenv("GOOGLE_CSE_ID", "").strip()
-    if google_key and google_cx:
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                response = await client.get(
-                    "https://www.googleapis.com/customsearch/v1",
-                    params={
-                        "key": google_key,
-                        "cx": google_cx,
-                        "q": f"{search_title} movie film web series TV series",
-                        "num": 10,
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-            for item in data.get("items", []):
-                name = (item.get("title") or "").strip()
-                if not name:
-                    continue
-                text_to_check = name + " " + (item.get("snippet") or "")
-                year_match = re.search(r"\b((?:19|20)\\d{2})\\b", text_to_check)
-                results.append({
-                    "title": name,
-                    "year": year_match.group(1) if year_match else "",
-                    "source": "google",
-                })
-        except Exception as exc:
-            log.warning("Google Custom Search unavailable (%s)", type(exc).__name__)
 
     return results
 
@@ -960,12 +930,11 @@ async def find_matching_titles(query):
         title = clean_candidate(item.get("title") or "")
         if valid_title(title) and title_similarity(search_title, title) >= 0.55:
             clean_external.append({**item, "title": title})
-            # Provider priority: OMDb > Wikidata > Tavily > Google.
+            # Provider priority: OMDb > Wikidata > Tavily.
             provider_rank = {
                 "omdb": 6,
                 "wikidata": 5,
                 "tavily": 4,
-                "google": 3,
             }.get(str(item.get("source") or "").lower(), 3)
             add_match(title, item.get("year"), 0, source_rank=provider_rank)
     try:
@@ -985,7 +954,7 @@ async def find_matching_titles(query):
         log.warning("Indexed title suggestions unavailable (%s)", type(exc).__name__)
 
     # Ranking: exact/closest title and requested year first; provider priority is
-    # TMDb > OMDb > Wikidata > Tavily > Google > MongoDB index > Movie Channel.
+    # TMDb > OMDb > Wikidata > Tavily > MongoDB index > Movie Channel.
     ordered = sorted(
         seen.values(),
         key=lambda row: (row[0], row[1], row[2], row[3], row[4]),
