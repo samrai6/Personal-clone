@@ -337,7 +337,7 @@ def save_movie_post(message):
 
 
 def update_saved_ott_date(message):
-    """Update only the saved OTT date from a Delete Channel message."""
+    """Update OTT Date or theatrical RDATE from a Delete Channel message."""
     caption = (message.caption or message.text or "").strip()
     if not caption:
         return False
@@ -345,23 +345,35 @@ def update_saved_ott_date(message):
     first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
     first_line = re.sub(r"<[^>]+>", "", first_line)
     first_line = re.sub(r"^[^\w(]+", "", first_line).strip()
-    title = re.sub(r"\s*(?:[–—-]\s*India\s+OTT\s+)?Date\s*:\s*.+$", "", first_line, flags=re.IGNORECASE).strip()
+
+    rdate_match = re.search(r"\bRDATE\s*:\s*(.+)$", first_line, re.IGNORECASE)
+    ott_date_match = re.search(r"\bDate\s*:\s*(.+)$", first_line, re.IGNORECASE) if not rdate_match else None
+    if rdate_match:
+        field_name = "theatrical_release_date"
+        release_date = rdate_match.group(1).strip()
+    elif ott_date_match:
+        field_name = "ott_release_date"
+        release_date = ott_date_match.group(1).strip()
+    else:
+        return False
+
+    title = first_line[:rdate_match.start() if rdate_match else ott_date_match.start()].strip()
+    title = re.sub(r"[–—-]\s*$", "", title).strip()
     year_match = re.search(r"\b((?:19|20)\d{2})\b", title)
     if not year_match:
         return False
 
     title_base = normalize_movie_key(clean_search_title(title))
-    _, ott_release_date = extract_ott_info(caption)
-    if not title_base or not ott_release_date:
+    if not title_base or not release_date:
         return False
 
     year = year_match.group(1)
     with db_connect() as conn:
         if not hasattr(conn, "movies"):
-            raise RuntimeError("OTT date updates require the configured MongoDB connection.")
+            raise RuntimeError("Date updates require the configured MongoDB connection.")
         result = conn.movies.update_one(
             {"title_base": title_base, "year": year},
-            {"$set": {"ott_release_date": ott_release_date, "updated_at": datetime.utcnow()}},
+            {"$set": {field_name: release_date, "updated_at": datetime.utcnow()}},
         )
     return result.matched_count > 0
 
