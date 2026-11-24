@@ -836,7 +836,7 @@ async def find_title(query):
 
 
 async def find_matching_titles(query):
-    """Return clean, relevant movie/series titles; saved Movie Channel entries rank first."""
+    """Merge clean titles from all providers; Movie Database Channel is the final fallback source."""
     matches = []
     seen = {}
     search_title = clean_search_title(query)
@@ -929,7 +929,7 @@ async def find_matching_titles(query):
                     # Exact normalized DB matches must never be lost because of punctuation
                     # or minor display-title differences (e.g. K.G.F vs KGF).
                     exact_db_match = bool(requested_key and saved_key == requested_key)
-                    add_match(clean_search_title(saved_title), saved_year, 0, source_rank=3, force_exact=exact_db_match)
+                    add_match(clean_search_title(saved_title), saved_year, 0, source_rank=1, force_exact=exact_db_match)
     except Exception as exc:
         log.warning("Saved movie suggestions unavailable (%s)", type(exc).__name__)
 
@@ -945,7 +945,7 @@ async def find_matching_titles(query):
                 name = item.get("title") if kind == "movie" else item.get("name")
                 date = item.get("release_date") if kind == "movie" else item.get("first_air_date")
                 year = date[:4] if date else ""
-                add_match(name, year, item.get("popularity") or 0, source_rank=2)
+                add_match(name, year, item.get("popularity") or 0, source_rank=7)
         except Exception as exc:
             log.warning("TMDB suggestions unavailable for %s (%s)", kind, type(exc).__name__)
 
@@ -960,7 +960,14 @@ async def find_matching_titles(query):
         title = clean_candidate(item.get("title") or "")
         if valid_title(title) and title_similarity(search_title, title) >= 0.55:
             clean_external.append({**item, "title": title})
-            add_match(title, item.get("year"), 0, source_rank=1)
+            # Provider priority: OMDb > Wikidata > Tavily > Google.
+            provider_rank = {
+                "omdb": 6,
+                "wikidata": 5,
+                "tavily": 4,
+                "google": 3,
+            }.get(str(item.get("source") or "").lower(), 3)
+            add_match(title, item.get("year"), 0, source_rank=provider_rank)
     try:
         save_indexed_suggestion_titles(clean_external)
     except Exception as exc:
@@ -973,12 +980,12 @@ async def find_matching_titles(query):
                 for indexed in conn.title_index.find({}, {"title": 1, "year": 1}):
                     title = clean_candidate(indexed.get("title") or "")
                     if valid_title(title):
-                        add_match(title, str(indexed.get("year") or ""), 0, source_rank=1)
+                        add_match(title, str(indexed.get("year") or ""), 0, source_rank=2)
     except Exception as exc:
         log.warning("Indexed title suggestions unavailable (%s)", type(exc).__name__)
 
-    # Ranking: exact title first, then closest spelling/title match, requested
-    # year, trusted catalogue source, and popularity as the final tie-breaker.
+    # Ranking: exact/closest title and requested year first; provider priority is
+    # TMDb > OMDb > Wikidata > Tavily > Google > MongoDB index > Movie Channel.
     ordered = sorted(
         seen.values(),
         key=lambda row: (row[0], row[1], row[2], row[3], row[4]),
