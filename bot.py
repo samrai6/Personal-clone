@@ -1287,7 +1287,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, source_channel_reply))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_database_channel_post), group=1)
-    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_ott_update_channel_post), group=1)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_ott_update_channel_post), group=2)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
