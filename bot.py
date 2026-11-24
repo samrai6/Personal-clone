@@ -211,12 +211,12 @@ def save_movie_post(message):
         return False
     first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
     first_line = re.sub(r"<[^>]+>", "", first_line)
-    first_line = re.sub(r"^[^\\w(]+", "", first_line).strip()
+    first_line = re.sub(r"^[^\w(]+", "", first_line).strip()
     title = first_line
     title_base = normalize_movie_key(clean_search_title(title))
     if not title_base:
         return False
-    year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", title)
+    year_match = re.search(r"\b((?:19|20)\d{2})\b", title)
     year = year_match.group(1) if year_match else ""
     photo_file_id = message.photo[-1].file_id if message.photo else None
     record = {
@@ -245,7 +245,7 @@ def find_saved_movie(query):
     title_base = normalize_movie_key(query_title)
     if not title_base:
         return None
-    year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", query)
+    year_match = re.search(r"\b((?:19|20)\d{2})\b", query)
     year = year_match.group(1) if year_match else ""
     with db_connect() as conn:
         if not hasattr(conn, "movies"):
