@@ -291,6 +291,27 @@ def apply_saved_ott_info(provider_lines, saved):
         output.append("India OTT Release Date: " + (release_date or "Not Announced Yet"))
     return output
 
+
+def apply_saved_theatrical_date(release_lines, saved):
+    """Use the manually saved theatrical date only when provider data is missing."""
+    lines = list(release_lines or [])
+    saved_date = (saved or {}).get("theatrical_release_date")
+    if not saved_date:
+        return lines
+
+    missing_values = {"", "not announced yet", "not available", "n/a", "not announced", "ಬಂದಿಲ್ಲ"}
+    for index, line in enumerate(lines):
+        if line.startswith(("India Theatrical Release Date:", "🇮🇳 India Theatrical Release Date:", "Release Date:")):
+            current = line.split(":", 1)[1].strip() if ":" in line else ""
+            if current.casefold() in missing_values:
+                label = line.split(":", 1)[0]
+                lines[index] = label + ": " + saved_date
+            return lines
+
+    lines.append("Theatrical Release Date: " + saved_date)
+    return lines
+
+
 def save_movie_post(message):
     caption = (message.caption or message.text or "").strip()
     if not caption:
@@ -712,7 +733,7 @@ async def show_movie(message, query, group_check=False):
     # User-managed Telegram Movie Database is checked before online APIs.
     try:
         saved = find_saved_movie(query)
-        if saved and not (saved.get("ott_platform") or saved.get("ott_release_date")):
+        if saved and not (saved.get("ott_platform") or saved.get("ott_release_date") or saved.get("theatrical_release_date")):
             bot = message.get_bot()
             # Re-send the saved poster and make every user-provided caption line bold.
             bold_caption = "<b>" + html.escape(saved.get("caption") or saved.get("title") or "") + "</b>"
@@ -775,6 +796,7 @@ async def show_movie(message, query, group_check=False):
             try:
                 details = await title_details(kind, item)
                 release_lines, provider_lines = await release_and_ott(kind, item["id"])
+                release_lines = apply_saved_theatrical_date(release_lines, saved)
                 provider_lines = apply_saved_ott_info(provider_lines, saved)
             except Exception as exc:
                 log.warning("TMDB details unavailable; trying IMDb fallback (%s)", type(exc).__name__)
@@ -788,7 +810,7 @@ async def show_movie(message, query, group_check=False):
             log.warning("IMDb fallback unavailable (%s)", type(exc).__name__)
         if details is None:
             return await show_title_suggestions(message, query)
-        release_lines = [f"Release Date: {details['date']}"]
+        release_lines = apply_saved_theatrical_date([f"Release Date: {details['date']}"], saved)
         provider_lines = apply_saved_ott_info(
             ["India OTT Platform: Not Available from IMDb"], saved
         )
