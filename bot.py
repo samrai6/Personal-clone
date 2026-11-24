@@ -586,7 +586,7 @@ async def omdb_get(params):
 
 
 async def find_external_suggestion_titles(query):
-    """Search OMDb, Wikidata and Tavily for additional movie/TV titles."""
+    """Search OMDb and Tavily for additional movie/TV titles."""
     search_title = clean_search_title(query)
     results = []
 
@@ -605,39 +605,6 @@ async def find_external_suggestion_titles(query):
             })
     except Exception as exc:
         log.warning("OMDb suggestion search unavailable (%s)", type(exc).__name__)
-
-    # Wikidata provides a public catalogue search; keep only film/TV-related entities.
-    try:
-        async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "PersonalCloneBot/1.0"}) as client:
-            response = await client.get(
-                "https://www.wikidata.org/w/api.php",
-                params={
-                    "action": "wbsearchentities",
-                    "search": search_title,
-                    "language": "en",
-                    "uselang": "en",
-                    "format": "json",
-                    "limit": 20,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-        for item in data.get("search", []):
-            name = (item.get("label") or "").strip()
-            description = (item.get("description") or "").casefold()
-            if not name or not any(term in description for term in (
-                "film", "movie", "television series", "tv series", "web series",
-                "animated series", "miniseries", "television program",
-            )):
-                continue
-            year_match = re.search(r"\b((?:19|20)\\d{2})\\b", description)
-            results.append({
-                "title": name,
-                "year": year_match.group(1) if year_match else "",
-                "source": "wikidata",
-            })
-    except Exception as exc:
-        log.warning("Wikidata suggestion search unavailable (%s)", type(exc).__name__)
 
     # Tavily web search. Only keep page titles that visibly match the requested title.
     tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
@@ -930,10 +897,9 @@ async def find_matching_titles(query):
         title = clean_candidate(item.get("title") or "")
         if valid_title(title) and title_similarity(search_title, title) >= 0.55:
             clean_external.append({**item, "title": title})
-            # Provider priority: OMDb > Wikidata > Tavily.
+            # Provider priority: OMDb > Tavily.
             provider_rank = {
                 "omdb": 6,
-                "wikidata": 5,
                 "tavily": 4,
             }.get(str(item.get("source") or "").lower(), 3)
             add_match(title, item.get("year"), 0, source_rank=provider_rank)
@@ -946,7 +912,9 @@ async def find_matching_titles(query):
     try:
         with db_connect() as conn:
             if hasattr(conn, "title_index"):
-                for indexed in conn.title_index.find({}, {"title": 1, "year": 1}):
+                for indexed in conn.title_index.find({}, {"title": 1, "year": 1, "source": 1}):
+                    if str(indexed.get("source") or "").lower() == "wikidata":
+                        continue
                     title = clean_candidate(indexed.get("title") or "")
                     if valid_title(title):
                         add_match(title, str(indexed.get("year") or ""), 0, source_rank=2)
@@ -954,7 +922,7 @@ async def find_matching_titles(query):
         log.warning("Indexed title suggestions unavailable (%s)", type(exc).__name__)
 
     # Ranking: exact/closest title and requested year first; provider priority is
-    # TMDb > OMDb > Wikidata > Tavily > MongoDB index > Movie Channel.
+    # TMDb > OMDb > Tavily > MongoDB index > Movie Channel.
     ordered = sorted(
         seen.values(),
         key=lambda row: (row[0], row[1], row[2], row[3], row[4]),
