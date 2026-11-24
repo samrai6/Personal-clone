@@ -212,7 +212,11 @@ def extract_ott_info(caption):
     for line in text.splitlines():
         line = line.strip()
         platform_match = re.match(r"^India\s+OTT\s+Platform\s*:\s*(.+)$", line, re.IGNORECASE)
-        date_match = re.match(r"^India\s+OTT\s+Release\s+Date\s*:\s*(.+)$", line, re.IGNORECASE)
+        date_match = re.match(r"^India\s+OTT\s+(?:Release\s+)?Date\s*:\s*(.+)$", line, re.IGNORECASE)
+        # Also accept a compact title line such as:
+        # Lovely Runner (2024) – India OTT Date: 08-09-2025
+        if not date_match:
+            date_match = re.search(r"[–—-]\s*India\s+OTT\s+(?:Release\s+)?Date\s*:\s*(.+)$", line, re.IGNORECASE)
         if platform_match:
             value = platform_match.group(1).strip()
             if value and value.casefold() not in {"not announced yet", "not available", "n/a"}:
@@ -271,6 +275,13 @@ def save_movie_post(message):
     first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
     first_line = re.sub(r"<[^>]+>", "", first_line)
     first_line = re.sub(r"^[^\w(]+", "", first_line).strip()
+    # Keep the movie title clean when OTT date is appended to the same line.
+    first_line = re.sub(
+        r"\s*[–—-]\s*India\s+OTT\s+(?:Release\s+)?Date\s*:\s*.+$",
+        "",
+        first_line,
+        flags=re.IGNORECASE,
+    ).strip()
     title = first_line
     title_base = normalize_movie_key(clean_search_title(title))
     if not title_base:
