@@ -1685,6 +1685,7 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def group_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Groups are suggestion-only: never reveal poster or full movie details."""
     message = update.effective_message
     if not message or not message.text:
         return
@@ -1692,9 +1693,34 @@ async def group_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(query) < 3 or len(query) > 90 or len(query.split()) > 8 or query.startswith("/"):
         return
     try:
-        await process_movie_query(message, query, context)
-    except Exception as exc:
-        log.exception("Group TMDB title check failed")
+        matches = await find_matching_titles(query)
+        if matches:
+            await show_title_suggestions(message, query)
+    except Exception:
+        log.exception("Group TMDB title suggestion failed")
+
+
+async def group_suggestion_list_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Save multi-line title/year lists posted in groups into the suggestion database."""
+    message = update.effective_message
+    if not message or not message.text or "\\n" not in message.text:
+        return
+    try:
+        saved_count = save_suggestion_post(message)
+        if saved_count:
+            log.info(
+                "Group suggestion titles saved: count=%s chat=%s message=%s",
+                saved_count, message.chat_id, message.message_id,
+            )
+            await reply_text_auto(
+                message,
+                f"✅ {saved_count} Movie names Suggestion Databaseಗೆ save ಆಗಿವೆ.",
+                reply_to_message_id=message.message_id,
+            )
+        else:
+            log.info("No title/year entries found in group list: chat=%s message=%s", message.chat_id, message.message_id)
+    except Exception:
+        log.exception("Could not save group suggestion list")
 
 
 async def health_check(reader, writer):
@@ -1755,7 +1781,8 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, private_reply))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.TEXT & ~filters.COMMAND, private_non_text))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.REPLY, source_discussion_reply), group=-1)
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check))
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check), group=0)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_suggestion_list_save), group=1)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, source_channel_reply))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_database_channel_post), group=1)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, suggestion_database_channel_post), group=2)
