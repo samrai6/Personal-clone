@@ -294,7 +294,7 @@ async def omdb_get(params):
 async def find_imdb_details(query):
     """Use OMDb's IMDb-linked catalogue only when TMDB has no exact title match."""
     search_title = clean_search_title(query)
-    requested_year = re.search(r"\\b((?:19|20)\\d{2})\\b", query)
+    requested_year = re.search(r"\b((?:19|20)\d{2})\b", query)
     params = {"s": search_title, "page": 1}
     results = await omdb_get(params)
     if not results:
