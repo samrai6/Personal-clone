@@ -843,14 +843,15 @@ async def find_matching_titles(query):
             return
         year = str(year or "")
         year_score = 1 if requested_year and year == requested_year else 0
+        year_number = int(year) if re.fullmatch(r"\\d{4}", year) else 0
         display = f"{name} ({year})" if year else name
-        # Keep the strongest version of a duplicate title, preferring a known year.
-        candidate = (exact_score, ratio, year_score, source_rank, float(popularity or 0), display)
+        # For duplicate titles, keep the newest known release year.
+        candidate = (exact_score, year_number, source_rank, ratio, year_score, float(popularity or 0), display)
         if clean_name in seen:
             old = seen[clean_name]
-            old_has_year = bool(re.search(r"\\(\\d{4}\\)$", old[5]))
-            new_has_year = bool(year)
-            if candidate[:5] > old[:5] or (new_has_year and not old_has_year):
+            old_has_year = bool(old[1])
+            new_has_year = bool(year_number)
+            if candidate[:6] > old[:6] or (new_has_year and not old_has_year):
                 seen[clean_name] = candidate
             return
         seen[clean_name] = candidate
@@ -943,14 +944,14 @@ async def find_matching_titles(query):
     except Exception as exc:
         log.warning("Indexed title suggestions unavailable (%s)", type(exc).__name__)
 
-    # Ranking: exact/closest title and requested year first; provider priority is
-    # TMDb > OMDb > MongoDB index > Movie Channel.
+    # Ranking: exact title first, then newest release year; saved DB sources
+    # take priority over external providers when title/year are otherwise comparable.
     ordered = sorted(
         seen.values(),
-        key=lambda row: (row[0], row[3], row[1], row[2], row[4]),
+        key=lambda row: (row[0], row[1], row[2], row[3], row[4], row[5]),
         reverse=True,
     )
-    return [row[5] for row in ordered[:10]]
+    return [row[6] for row in ordered[:10]]
 
 
 async def title_details(kind, item):
