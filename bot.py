@@ -45,6 +45,7 @@ async def react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = 1315244338
+MOVIE_DATABASE_CHANNEL_ID = -1004402999657
 # TMDB Read Access Token from Ironman poster plugin.
 TMDB_BEARER_TOKEN = os.getenv("TMDB_BEARER_TOKEN", "").strip()
 MOVIE_BOT = "Samp_yu5bot"
@@ -187,9 +188,7 @@ def get_source_channel():
 
 
 def get_database_channel():
-    with db_connect() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key='movie_database_channel_id'").fetchone()
-    return int(row[0]) if row else None
+    return MOVIE_DATABASE_CHANNEL_ID
 
 
 def set_database_channel(chat_id):
@@ -821,11 +820,9 @@ async def mdb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message or update.effective_user.id != OWNER_ID:
         return
     current = get_database_channel()
-    status = f"Current Movie Database Channel: <code>{current}</code>" if current else "Movie Database Channel ಇನ್ನೂ set ಆಗಿಲ್ಲ."
-    context.user_data["waiting_for_database_channel"] = True
     await reply_text_auto(
         message,
-        f"<b>Movie Database Settings</b>\\n{status}\\n\\nನಿನ್ನ Movie Database Channel‌ನ ಒಂದು original post ಅನ್ನು ಇಲ್ಲಿ Forward ಮಾಡು.\\n\\nಆ Channelಗೆ bot ಅನ್ನು Admin ಮಾಡಬೇಕು.",
+        f"<b>Movie Database Channel</b>\\nChannel ID: <code>{current}</code>\\n\\nಈ Channel ID ಅನ್ನು bot codeನಲ್ಲಿ fixed ಆಗಿ ಇಟ್ಟಿದ್ದೇವೆ. ಮತ್ತೆ /mdb ಮೂಲಕ set ಮಾಡುವ ಅಗತ್ಯವಿಲ್ಲ. Botಗೆ ಆ Channelನಲ್ಲಿ Admin permission ಇರಬೇಕು.",
         parse_mode="HTML",
     )
 
