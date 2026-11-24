@@ -425,11 +425,17 @@ def delete_saved_movie_record(message):
         origin_chat_id = getattr(origin_chat, "id", None)
         origin_message_id = getattr(origin, "message_id", None)
         if origin_chat_id == MOVIE_DATABASE_CHANNEL_ID and origin_message_id:
-            result = conn.movies.delete_one({
+            saved = conn.movies.find_one({
                 "channel_id": int(origin_chat_id),
                 "message_id": int(origin_message_id),
             })
-            if result.deleted_count:
+            if saved:
+                conn.movies.delete_one({"_id": saved["_id"]})
+                if hasattr(conn, "title_index"):
+                    conn.title_index.delete_many({
+                        "title_base": saved.get("title_base", ""),
+                        "year": saved.get("year", ""),
+                    })
                 return True
 
         # Copied posts have no forward metadata, so match their title and year.
@@ -446,8 +452,9 @@ def delete_saved_movie_record(message):
         if not title_base:
             return False
 
-        result = conn.movies.delete_one({"title_base": title_base, "year": year})
-    return result.deleted_count > 0
+        movie_result = conn.movies.delete_one({"title_base": title_base, "year": year})
+        title_result = conn.title_index.delete_many({"title_base": title_base, "year": year}) if hasattr(conn, "title_index") else None
+    return movie_result.deleted_count > 0 or bool(title_result and title_result.deleted_count > 0)
 
 def find_saved_movie(query):
     query_title = clean_search_title(query)
