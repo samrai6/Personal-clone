@@ -1052,7 +1052,7 @@ async def movie_ott_update_channel_post(update: Update, context: ContextTypes.DE
         return
     try:
         caption = (message.caption or message.text or "").strip()
-        if re.match(r"^\\s*DELETE\\s*:", caption, re.IGNORECASE):
+        if re.match(r"^\s*DELETE\s*:", caption, re.IGNORECASE):
             deleted = delete_saved_movie_record(message)
             if deleted:
                 log.info("Movie database record deleted from Delete Channel: message=%s", message.message_id)
