@@ -990,11 +990,11 @@ async def show_title_suggestions(message, query):
         f"{index}. <code>{html.escape(name)}</code>"
         for index, name in enumerate(matches, start=1)
     )
-    await reply_text_auto(message, 
+    await reply_text_auto(
+        message,
         "<b>ನೀವು ಹುಡುಕುತ್ತಿರುವ Movie / Web Series ಇದರಲ್ಲಿ ಇರಬಹುದೇ?\n"
         "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\n"
-        f"{suggestions}\n\n"
-
+        f"{suggestions}",
         parse_mode="HTML",
         reply_to_message_id=message.message_id,
     )
