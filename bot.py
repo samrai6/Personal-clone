@@ -786,7 +786,7 @@ async def find_matching_titles(query):
     """Combine suggestions in provider order: TMDb, local MongoDB, then OMDb."""
     matches = {}
     search_title = clean_search_title(query)
-    requested_year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", query)
+    requested_year_match = re.search(r"\b((?:19|20)\d{2})\b", query)
     requested_year = requested_year_match.group(1) if requested_year_match else None
     requested_key = normalize_movie_key(search_title)
 
@@ -800,12 +800,12 @@ async def find_matching_titles(query):
     )
 
     def clean_candidate(value):
-        name = re.sub(r"\\s+", " ", str(value or "")).strip()
+        name = re.sub(r"\s+", " ", str(value or "")).strip()
         name = re.sub(
-            r"\\s*(?:[-|–—:]\\s*)?(?:where to watch(?: and stream)?|watch and stream|"
+            r"\s*(?:[-|–—:]\s*)?(?:where to watch(?: and stream)?|watch and stream|"
             r"streaming guide|movie review|official trailer|full movie).*$",
             "", name, flags=re.IGNORECASE,
-        ).strip(" \\t-–—|:")
+        ).strip(" \t-–—|:")
         return name
 
     def valid_title(value):
@@ -813,10 +813,10 @@ async def find_matching_titles(query):
         lowered = name.casefold()
         if not name or len(name) > 85 or any(term in lowered for term in blocked_phrases):
             return False
-        if any(ch in name for ch in ("|", "\\n", "\\r", "http://", "https://")):
+        if any(ch in name for ch in ("|", "\n", "\r", "http://", "https://")):
             return False
         if len(name.split()) > 9 or re.search(
-            r"\\b(is an|are the|movie review|release date|where to watch)\\b", lowered
+            r"\b(is an|are the|movie review|release date|where to watch)\b", lowered
         ):
             return False
         return True
@@ -833,7 +833,7 @@ async def find_matching_titles(query):
         if ratio < 0.50 and not force_exact:
             return
         year = str(year or "")
-        year_number = int(year) if re.fullmatch(r"\\d{4}", year) else 0
+        year_number = int(year) if re.fullmatch(r"\d{4}", year) else 0
         year_score = 1 if requested_year and year == requested_year else 0
         display = f"{name} ({year})" if year else name
         candidate = (exact_score, year_number, source_rank, ratio, year_score, float(popularity or 0), display)
@@ -868,7 +868,7 @@ async def find_matching_titles(query):
                         saved_title = re.sub(r"<[^>]+>", "", saved_title).strip()
                     saved_year = str(saved.get("year") or "")
                     if not saved_year:
-                        year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", saved_title)
+                        year_match = re.search(r"\b((?:19|20)\d{2})\b", saved_title)
                         saved_year = year_match.group(1) if year_match else ""
                     saved_key = str(saved.get("title_base") or normalize_movie_key(clean_search_title(saved_title)))
                     add_match(
