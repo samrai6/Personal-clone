@@ -475,14 +475,33 @@ def delete_saved_movie_record(message):
             raise RuntimeError("Movie deletion requires the configured MongoDB connection.")
 
         def delete_by_title_year(title_base, year):
-            movie_result = conn.movies.delete_one({"title_base": title_base, "year": year})
-            title_result = conn.title_index.delete_many({"title_base": title_base, "year": year}) if hasattr(conn, "title_index") else None
-            suggestion_result = conn.suggestions.delete_many({"title_base": title_base, "year": year}) if hasattr(conn, "suggestions") else None
-            return (
-                movie_result.deleted_count > 0
-                or bool(title_result and title_result.deleted_count > 0)
-                or bool(suggestion_result and suggestion_result.deleted_count > 0)
+            # First delete by the indexed key, then compare normalized stored titles
+            # as a fallback for older records saved with a different title format.
+            total_deleted = 0
+            collections = [conn.movies]
+            if hasattr(conn, "title_index"):
+                collections.append(conn.title_index)
+            if hasattr(conn, "suggestions"):
+                collections.append(conn.suggestions)
+
+            for collection in collections:
+                result = collection.delete_many({"title_base": title_base, "year": year})
+                total_deleted += result.deleted_count
+
+                # Legacy/variant records may have a missing or differently normalized key.
+                for saved in collection.find({}):
+                    saved_year = str(saved.get("year") or "")
+                    saved_title = saved.get("title") or saved.get("name") or saved.get("title_base") or ""
+                    saved_key = normalize_movie_key(clean_search_title(str(saved_title)))
+                    if saved_year == str(year) and saved_key == title_base:
+                        result = collection.delete_one({"_id": saved["_id"]})
+                        total_deleted += result.deleted_count
+
+            log.info(
+                "Delete title/year result: title_key=%s year=%s deleted=%s",
+                title_base, year, total_deleted,
             )
+            return total_deleted > 0
 
         # Forwarded posts can be deleted by their exact original channel/message IDs.
         origin = getattr(message, "forward_origin", None)
