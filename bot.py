@@ -401,6 +401,36 @@ def update_saved_ott_date(message):
     return result.matched_count > 0
 
 
+
+def delete_saved_movie_record(message):
+    """Delete one movie's saved MongoDB record from an explicit Delete Channel command."""
+    caption = (message.caption or message.text or "").strip()
+    if not caption:
+        return False
+
+    first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
+    first_line = re.sub(r"<[^>]+>", "", first_line).strip()
+    match = re.match(r"^DELETE\s*:\s*(.+)$", first_line, re.IGNORECASE)
+    if not match:
+        return False
+
+    title = match.group(1).strip()
+    year_match = re.search(r"\b((?:19|20)\d{2})\b", title)
+    if not year_match:
+        return False
+
+    title_base = normalize_movie_key(clean_search_title(title))
+    year = year_match.group(1)
+    if not title_base:
+        return False
+
+    with db_connect() as conn:
+        if not hasattr(conn, "movies"):
+            raise RuntimeError("Movie deletion requires the configured MongoDB connection.")
+        result = conn.movies.delete_one({"title_base": title_base, "year": year})
+    return result.deleted_count > 0
+
+
 def find_saved_movie(query):
     query_title = clean_search_title(query)
     title_base = normalize_movie_key(query_title)
@@ -1021,13 +1051,22 @@ async def movie_ott_update_channel_post(update: Update, context: ContextTypes.DE
     if not message or message.chat_id != DELETE_CHANNEL_ID:
         return
     try:
+        caption = (message.caption or message.text or "").strip()
+        if re.match(r"^\\s*DELETE\\s*:", caption, re.IGNORECASE):
+            deleted = delete_saved_movie_record(message)
+            if deleted:
+                log.info("Movie database record deleted from Delete Channel: message=%s", message.message_id)
+            else:
+                log.warning("Movie delete command ignored: movie/year not found (message=%s)", message.message_id)
+            return
+
         updated = update_saved_ott_date(message)
         if updated:
             log.info("Movie OTT date updated from Delete Channel: message=%s", message.message_id)
         else:
             log.warning("OTT date update ignored: movie/year not found or date missing (message=%s)", message.message_id)
     except Exception as exc:
-        log.exception("Could not update movie OTT date (%s)", type(exc).__name__)
+        log.exception("Could not process Delete Channel command (%s)", type(exc).__name__)
 
 
 async def mdb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
