@@ -49,7 +49,7 @@ OWNER_ID = 1315244338
 TMDB_BEARER_TOKEN = os.getenv("TMDB_BEARER_TOKEN", "").strip()
 MOVIE_BOT = "Samp_yu5bot"
 TMDB_BASE = "https://api.themoviedb.org/3"
-OMDB_API_KEY = "7a1cd816"
+OMDB_API_KEY = os.getenv("OMDB_API_KEY", "").strip()
 OMDB_BASE = "https://www.omdbapi.com/"
 LANGUAGE = "en-US"
 
@@ -281,6 +281,8 @@ async def tmdb_get(path, params=None):
 
 
 async def omdb_get(params):
+    if not OMDB_API_KEY:
+        return None
     query = {"apikey": OMDB_API_KEY, **params}
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.get(OMDB_BASE, params=query)
