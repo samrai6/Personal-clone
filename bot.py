@@ -46,6 +46,7 @@ async def react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = 1315244338
 MOVIE_DATABASE_CHANNEL_ID = -1004402999657
+DELETE_CHANNEL_ID = -1004392593374
 # TMDB Read Access Token from Ironman poster plugin.
 TMDB_BEARER_TOKEN = os.getenv("TMDB_BEARER_TOKEN", "").strip()
 MOVIE_BOT = "Samp_yu5bot"
@@ -212,11 +213,12 @@ def extract_ott_info(caption):
     for line in text.splitlines():
         line = line.strip()
         platform_match = re.match(r"^India\s+OTT\s+Platform\s*:\s*(.+)$", line, re.IGNORECASE)
-        date_match = re.match(r"^India\s+OTT\s+(?:Release\s+)?Date\s*:\s*(.+)$", line, re.IGNORECASE)
-        # Also accept a compact title line such as:
+        date_match = re.match(r"^(?:India\s+OTT\s+(?:Release\s+)?Date|Date)\s*:\s*(.+)$", line, re.IGNORECASE)
+        # Also accept compact title lines such as:
         # Lovely Runner (2024) – India OTT Date: 08-09-2025
+        # Lovely Runner (2024) Date: 08-09-2025
         if not date_match:
-            date_match = re.search(r"[–—-]\s*India\s+OTT\s+(?:Release\s+)?Date\s*:\s*(.+)$", line, re.IGNORECASE)
+            date_match = re.search(r"(?:[–—-]\s*India\s+OTT\s+|\b)Date\s*:\s*(.+)$", line, re.IGNORECASE)
         if platform_match:
             value = platform_match.group(1).strip()
             if value and value.casefold() not in {"not announced yet", "not available", "n/a"}:
@@ -332,6 +334,36 @@ def save_movie_post(message):
             upsert=True,
         )
     return True
+
+
+def update_saved_ott_date(message):
+    """Update only the saved OTT date from a Delete Channel message."""
+    caption = (message.caption or message.text or "").strip()
+    if not caption:
+        return False
+
+    first_line = next((line.strip() for line in caption.splitlines() if line.strip()), "")
+    first_line = re.sub(r"<[^>]+>", "", first_line)
+    first_line = re.sub(r"^[^\w(]+", "", first_line).strip()
+    title = re.sub(r"\s*(?:[–—-]\s*India\s+OTT\s+)?Date\s*:\s*.+$", "", first_line, flags=re.IGNORECASE).strip()
+    year_match = re.search(r"\b((?:19|20)\d{2})\b", title)
+    if not year_match:
+        return False
+
+    title_base = normalize_movie_key(clean_search_title(title))
+    _, ott_release_date = extract_ott_info(caption)
+    if not title_base or not ott_release_date:
+        return False
+
+    year = year_match.group(1)
+    with db_connect() as conn:
+        if not hasattr(conn, "movies"):
+            raise RuntimeError("OTT date updates require the configured MongoDB connection.")
+        result = conn.movies.update_one(
+            {"title_base": title_base, "year": year},
+            {"$set": {"ott_release_date": ott_release_date, "updated_at": datetime.utcnow()}},
+        )
+    return result.matched_count > 0
 
 
 def find_saved_movie(query):
@@ -948,6 +980,20 @@ async def movie_database_channel_post(update: Update, context: ContextTypes.DEFA
         log.exception("Could not save movie database post (%s)", type(exc).__name__)
 
 
+async def movie_ott_update_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.channel_post
+    if not message or message.chat_id != DELETE_CHANNEL_ID:
+        return
+    try:
+        updated = update_saved_ott_date(message)
+        if updated:
+            log.info("Movie OTT date updated from Delete Channel: message=%s", message.message_id)
+        else:
+            log.warning("OTT date update ignored: movie/year not found or date missing (message=%s)", message.message_id)
+    except Exception as exc:
+        log.exception("Could not update movie OTT date (%s)", type(exc).__name__)
+
+
 async def mdb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     if not message or update.effective_user.id != OWNER_ID:
@@ -1200,6 +1246,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, source_channel_reply))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_database_channel_post), group=1)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_ott_update_channel_post), group=1)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
