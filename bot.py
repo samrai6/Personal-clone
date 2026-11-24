@@ -461,7 +461,7 @@ def update_saved_ott_date(message):
 
 
 def delete_saved_movie_record(message):
-    """Delete a saved movie record using a forwarded or copied database-channel post."""
+    """Delete matching movie and suggestion-name records from MongoDB."""
     caption = (message.caption or message.text or "").strip()
     if not caption:
         return False
@@ -474,6 +474,16 @@ def delete_saved_movie_record(message):
         if not hasattr(conn, "movies"):
             raise RuntimeError("Movie deletion requires the configured MongoDB connection.")
 
+        def delete_by_title_year(title_base, year):
+            movie_result = conn.movies.delete_one({"title_base": title_base, "year": year})
+            title_result = conn.title_index.delete_many({"title_base": title_base, "year": year}) if hasattr(conn, "title_index") else None
+            suggestion_result = conn.suggestions.delete_many({"title_base": title_base, "year": year}) if hasattr(conn, "suggestions") else None
+            return (
+                movie_result.deleted_count > 0
+                or bool(title_result and title_result.deleted_count > 0)
+                or bool(suggestion_result and suggestion_result.deleted_count > 0)
+            )
+
         # Forwarded posts can be deleted by their exact original channel/message IDs.
         origin = getattr(message, "forward_origin", None)
         origin_chat = getattr(origin, "chat", None)
@@ -485,15 +495,17 @@ def delete_saved_movie_record(message):
                 "message_id": int(origin_message_id),
             })
             if saved:
+                title_base = saved.get("title_base", "")
+                year = saved.get("year", "")
                 conn.movies.delete_one({"_id": saved["_id"]})
-                if hasattr(conn, "title_index"):
-                    conn.title_index.delete_many({
-                        "title_base": saved.get("title_base", ""),
-                        "year": saved.get("year", ""),
-                    })
+                if title_base and year:
+                    if hasattr(conn, "title_index"):
+                        conn.title_index.delete_many({"title_base": title_base, "year": year})
+                    if hasattr(conn, "suggestions"):
+                        conn.suggestions.delete_many({"title_base": title_base, "year": year})
                 return True
 
-        # Copied posts have no forward metadata, so match their title and year.
+        # A copied title/year line deletes it from all three MongoDB title collections.
         explicit = re.match(r"^DELETE\s*:\s*(.+)$", first_line, re.IGNORECASE)
         title = explicit.group(1).strip() if explicit else first_line
         if re.search(r"\b(?:RDATE|Date)\s*:", title, re.IGNORECASE):
@@ -507,9 +519,7 @@ def delete_saved_movie_record(message):
         if not title_base:
             return False
 
-        movie_result = conn.movies.delete_one({"title_base": title_base, "year": year})
-        title_result = conn.title_index.delete_many({"title_base": title_base, "year": year}) if hasattr(conn, "title_index") else None
-    return movie_result.deleted_count > 0 or bool(title_result and title_result.deleted_count > 0)
+        return delete_by_title_year(title_base, year)
 
 def find_saved_movie(query):
     query_title = clean_search_title(query)
