@@ -925,7 +925,7 @@ async def release_and_ott(kind, item_id):
                     value = entry.get("release_date", "")
                     if entry.get("type") == 4 and value:
                         try:
-                            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                            parsed = datetime.strptime(value[:10], "%Y-%m-%d")
                             all_digital_dates.append(parsed)
                         except ValueError:
                             continue
@@ -1069,104 +1069,6 @@ async def apply_tavily_ott_date(details, provider_lines):
         else:
             updated.append(line)
     return updated
-
-async def find_tavily_india_ott_date(title, year=""):
-    """Research only the India OTT release date; never use Tavily for posters/details/suggestions."""
-    if not TAVILY_API_KEY:
-        return None
-    query = f'"{title}" {year} India OTT streaming release date digital premiere'.strip()
-    payload = {
-        "api_key": TAVILY_API_KEY,
-        "query": query,
-        "topic": "general",
-        "search_depth": "advanced",
-        "max_results": 6,
-        "include_answer": True,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post("https://api.tavily.com/search", json=payload)
-            response.raise_for_status()
-            data = response.json()
-    except Exception as exc:
-        log.warning("Tavily India OTT date research unavailable (%s)", type(exc).__name__)
-        return None
-
-    # Only accept a date stated in an India + OTT/streaming context for this title.
-    texts = []
-    if data.get("answer"):
-        texts.append(str(data["answer"]))
-    for result in data.get("results", []):
-        content = result.get("content") or ""
-        title_text = result.get("title") or ""
-        if content:
-            texts.append(str(title_text) + ". " + str(content))
-
-    date_patterns = (
-        r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b",
-        r"\b(\d{1,2})[./-](\d{1,2})[./-](20\d{2})\b",
-        r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b",
-        r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(20\d{2})\b",
-    )
-    month_map = {name.lower(): index for index, name in enumerate(
-        ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"), 1
-    )}
-    for text in texts:
-        for sentence in re.split(r"(?<=[.!?])\s+|\n", text):
-            lowered = sentence.casefold()
-            if not any(term in lowered for term in ("india", "indian")):
-                continue
-            if not any(term in lowered for term in ("ott", "stream", "digital", "on jio", "on netflix", "on prime", "premiere")):
-                continue
-            if any(term in lowered for term in ("theatrical release", "in theatres", "in theaters", "cinema release")):
-                continue
-            for pattern in date_patterns:
-                match = re.search(pattern, sentence, re.IGNORECASE)
-                if not match:
-                    continue
-                try:
-                    if pattern == date_patterns[0]:
-                        date_value = datetime.strptime("-".join(match.groups()), "%Y-%m-%d")
-                    elif pattern == date_patterns[1]:
-                        day, month, year_value = match.groups()
-                        date_value = datetime(int(year_value), int(month), int(day))
-                    elif pattern == date_patterns[2]:
-                        day, month_name, year_value = match.groups()
-                        date_value = datetime(int(year_value), month_map[month_name.lower()], int(day))
-                    else:
-                        month_name, day, year_value = match.groups()
-                        date_value = datetime(int(year_value), month_map[month_name.lower()], int(day))
-                    if year and date_value.year < int(year):
-                        continue
-                    return date_value.strftime("%d-%m-%Y")
-                except (ValueError, TypeError):
-                    continue
-    return None
-
-
-async def apply_tavily_ott_date(details, provider_lines):
-    """Replace only the India OTT Release Date line when Tavily finds a credible date."""
-    current = next(
-        (line.split(":", 1)[1].strip() for line in (provider_lines or [])
-         if line.startswith("First OTT Release Date:")),
-        "Not Announced Yet",
-    )
-    missing = {"", "not announced yet", "not available", "n/a", "ಬಂದಿಲ್ಲ"}
-    if current.casefold() not in missing:
-        return provider_lines
-    found = await find_tavily_india_ott_date(details.get("title", ""), details.get("year", ""))
-    if not found:
-        return provider_lines
-    updated = []
-    for line in provider_lines or []:
-        if line.startswith("First OTT Release Date:"):
-            updated.append("First OTT Release Date: " + found)
-        elif line.startswith("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ:"):
-            updated.append("📌 ಟೆಲಿಗ್ರಾಂಗೆ ಬರುವ ಸಾಧ್ಯತೆ: " + found)
-        else:
-            updated.append(line)
-    return updated
-
 
 async def show_title_suggestions(message, query):
     matches = await find_matching_titles(query)
