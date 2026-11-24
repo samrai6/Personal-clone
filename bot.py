@@ -1049,7 +1049,7 @@ async def show_title_suggestions(message, query):
     return True
 
 
-async def show_movie(message, query, group_check=False):
+async def show_movie(message, query, group_check=False, confirmed=False):
     if group_check:
         await show_title_suggestions(message, query)
         return
@@ -1520,6 +1520,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def process_movie_query(message, query, context):
+    """Show suggestions first in PM and groups; details only after a suggested title is sent again."""
+    pending_key = f"movie_suggestions:{message.chat_id}"
+    pending = context.user_data.get(pending_key, [])
+    query_key = normalize_movie_key(clean_search_title(query))
+    pending_keys = {
+        normalize_movie_key(clean_search_title(title))
+        for title in pending
+    }
+    if query_key and query_key in pending_keys:
+        context.user_data.pop(pending_key, None)
+        return await show_movie(message, query, confirmed=True)
+
+    matches = await find_matching_titles(query)
+    if matches:
+        context.user_data[pending_key] = matches
+        return await show_title_suggestions(message, query)
+
+    context.user_data.pop(pending_key, None)
+    return False
+
+
 async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     if not message or not message.text:
@@ -1528,7 +1550,7 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(query) < 2 or len(query) > 100:
         return
     try:
-        handled = await show_movie(message, query)
+        handled = await process_movie_query(message, query, context)
         if not handled:
             sent = await relay_private_message(message, context)
             if not sent:
@@ -1549,7 +1571,7 @@ async def group_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(query) < 3 or len(query) > 90 or len(query.split()) > 8 or query.startswith("/"):
         return
     try:
-        await show_movie(message, query, group_check=True)
+        await process_movie_query(message, query, context)
     except Exception as exc:
         log.exception("Group TMDB title check failed")
 
