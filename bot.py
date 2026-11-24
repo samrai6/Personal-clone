@@ -296,21 +296,31 @@ def title_similarity(query, title):
     return SequenceMatcher(None, clean_query, clean_title).ratio()
 
 
+def clean_search_title(query):
+    """Remove a trailing release year such as (2026) before title matching."""
+    return re.sub(r"\\s*\\(?\\b(?:19|20)\\d{2}\\)?\\s*$", "", query).strip()
+
+
 async def find_title(query):
-    """Search both movies and TV shows; prefer the strongest title match."""
+    """Search movies and TV shows; treat a year in brackets as a hint, not part of the title."""
+    search_title = clean_search_title(query)
+    year_match = re.search(r"\\b((?:19|20)\\d{2})\\b", query)
+    requested_year = year_match.group(1) if year_match else None
     found = []
     for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
-        data = await tmdb_get(endpoint, {"query": query, "include_adult": "false", "page": 1})
-        for item in data.get("results", [])[:10]:
+        data = await tmdb_get(endpoint, {"query": search_title, "include_adult": "false", "page": 1})
+        for item in data.get("results", [])[:20]:
             name = item.get("title") if kind == "movie" else item.get("name")
             if not name:
                 continue
-            ratio = title_similarity(query, name)
-            found.append((ratio, kind, item))
+            ratio = title_similarity(search_title, name)
+            date = item.get("release_date") if kind == "movie" else item.get("first_air_date")
+            year_match_score = 1 if requested_year and date and date[:4] == requested_year else 0
+            found.append((ratio, year_match_score, kind, item))
     if not found:
         return None
-    found.sort(key=lambda row: (row[0], float(row[2].get("popularity") or 0)), reverse=True)
-    return found[0][1], found[0][2], found[0][0]
+    found.sort(key=lambda row: (row[0], row[1], float(row[3].get("popularity") or 0)), reverse=True)
+    return found[0][2], found[0][3], found[0][0]
 
 
 async def find_matching_titles(query):
@@ -436,7 +446,7 @@ async def show_movie(message, query, group_check=False):
     # the same spelling suggestions used in groups.
     kind, item, similarity = result
     matched_title = item.get("title") if kind == "movie" else item.get("name")
-    clean_query = re.sub(r"[^a-z0-9]+", "", query.casefold())
+    clean_query = re.sub(r"[^a-z0-9]+", "", clean_search_title(query).casefold())
     clean_title = re.sub(r"[^a-z0-9]+", "", (matched_title or "").casefold())
     if not clean_query or clean_query != clean_title:
         return await show_title_suggestions(message, query)
