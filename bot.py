@@ -1224,7 +1224,8 @@ async def show_title_suggestions(message, query, matches=None):
         message,
         "<b>ನೀವು ಹುಡುಕುತ್ತಿರುವ Movie / Web Series ಇದರಲ್ಲಿ ಇರಬಹುದೇ?\n"
         "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\n"
-        f"{suggestions}",
+        f"{suggestions}\n\n"
+        "ಇದರಲ್ಲಿ ಇದ್ದರೆ, ಹೆಸರಿನ ಮೇಲೆ ಕ್ಲಿಕ್ ಮಾಡಿ Copy ಮಾಡಿ ಕಳುಹಿಸಿ.",
         parse_mode="HTML",
         reply_to_message_id=message.message_id,
     )
