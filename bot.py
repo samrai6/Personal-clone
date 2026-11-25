@@ -858,8 +858,13 @@ def movie_search_queries(query):
         )
 
     core = re.sub(r"\s+", " ", cleaned).strip(" -_.,:;")
+
+    # Common title spelling corrections; keep the user's original query as a fallback.
+    corrected = re.sub(r"\boddessy\b", "odyssey", core, flags=re.IGNORECASE)
+    corrected = re.sub(r"\boddesy\b", "odyssey", corrected, flags=re.IGNORECASE)
+
     queries = []
-    for value in (core, original):
+    for value in (corrected, core, original):
         value = re.sub(r"\s+", " ", value).strip()
         if value and normalize_movie_key(value) not in {
             normalize_movie_key(item) for item in queries
