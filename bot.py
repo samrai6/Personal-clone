@@ -225,21 +225,21 @@ def normalize_movie_key(value):
 def movie_name_script_reply(value):
     """Return a language-specific prompt when a movie query uses a non-Latin script."""
     value = value or ""
-    if re.search(r"[\\u0C80-\\u0CFF]", value):
+    if re.search(r"[\u0C80-\u0CFF]", value):
         return (
-            "**ದಯವಿಟ್ಟು ಮೂವೀ ಹೆಸರನ್ನು ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಮಾತ್ರ ಟೈಪ್ ಮಾಡಿ ಕಳುಹಿಸಿ.**\\n\\n"
-            "**Example:**\\n"
-            "**RRR (2022)**\\n"
-            "**Preamada Oorali (2026)**\\n"
+            "**ದಯವಿಟ್ಟು ಮೂವೀ ಹೆಸರನ್ನು ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಮಾತ್ರ ಟೈಪ್ ಮಾಡಿ ಕಳುಹಿಸಿ.**\n\n"
+            "**Example:**\n"
+            "**RRR (2022)**\n"
+            "**Preamada Oorali (2026)**\n"
             "**KGF Chapter 2 (2022)**"
         )
     for char in value:
         if char.isalpha() and "LATIN" not in unicodedata.name(char, ""):
             return (
-                "**Please type and send the movie name in English only.**\\n\\n"
-                "**Example:**\\n"
-                "**RRR (2022)**\\n"
-                "**Preamada Oorali (2026)**\\n"
+                "**Please type and send the movie name in English only.**\n\n"
+                "**Example:**\n"
+                "**RRR (2022)**\n"
+                "**Preamada Oorali (2026)**\n"
                 "**KGF Chapter 2 (2022)**"
             )
     return None
@@ -1296,7 +1296,7 @@ async def fs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = f"Current Source Channel ID: {channel_id}" if channel_id else "Source Channel ಇನ್ನೂ set ಆಗಿಲ್ಲ."
     await reply_text_auto(
         update.effective_message,
-        f"<b>Source Channel Settings</b>\\n{status}\\n\\nಕೆಳಗಿನ buttons ಬಳಸಿ:",
+        f"<b>Source Channel Settings</b>\n{status}\n\nಕೆಳಗಿನ buttons ಬಳಸಿ:",
         parse_mode="HTML",
         reply_markup=source_settings_keyboard(),
     )
@@ -1312,7 +1312,7 @@ async def fs_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "set":
         context.user_data["waiting_for_source_channel"] = True
         await query.message.reply_text(
-            "Source Channel‌ನ ಯಾವುದಾದರೂ ಒಂದು post ಅನ್ನು ಇಲ್ಲಿ Forward ಮಾಡಿ.\\n"
+            "Source Channel‌ನ ಯಾವುದಾದರೂ ಒಂದು post ಅನ್ನು ಇಲ್ಲಿ Forward ಮಾಡಿ.\n"
             "Bot ಆ Channel ಅನ್ನು Source ಆಗಿ save ಮಾಡುತ್ತದೆ."
         )
     elif action == "remove":
@@ -1338,7 +1338,7 @@ async def accept_source_forward(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data.pop("waiting_for_database_channel", None)
         await reply_text_auto(
             message,
-            f"✅ Movie Database Channel set ಆಯಿತು.\\nChannel ID: <code>{source_chat.id}</code>\\nBotಗೆ ಆ Channelನಲ್ಲಿ Admin permission ಕೊಡು.",
+            f"✅ Movie Database Channel set ಆಯಿತು.\nChannel ID: <code>{source_chat.id}</code>\nBotಗೆ ಆ Channelನಲ್ಲಿ Admin permission ಕೊಡು.",
             parse_mode="HTML",
         )
         return
@@ -1351,7 +1351,7 @@ async def accept_source_forward(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data.pop("waiting_for_source_channel", None)
     await reply_text_auto(
         message,
-        f"✅ Source Channel set ಆಯಿತು.\\nChannel ID: <code>{source_chat.id}</code>",
+        f"✅ Source Channel set ಆಯಿತು.\nChannel ID: <code>{source_chat.id}</code>",
         parse_mode="HTML",
     )
 
@@ -1366,16 +1366,16 @@ async def relay_private_message(message, context: ContextTypes.DEFAULT_TYPE):
     name = user.full_name or "Unknown"
     username = f"@{user.username}" if user.username else "Not set"
     header = (
-        "📩 New PM\\n"
-        f"Name: {name}\\n"
-        f"Username: {username}\\n"
-        f"User ID: {user.id}\\n"
+        "📩 New PM\n"
+        f"Name: {name}\n"
+        f"Username: {username}\n"
+        f"User ID: {user.id}\n"
         "━━━━━━━━━━━━━━"
     )
     if message.text:
         sent = await context.bot.send_message(
             chat_id=source_id,
-            text=(header + "\\n" + message.text)[:4000],
+            text=(header + "\n" + message.text)[:4000],
             disable_web_page_preview=True,
         )
         save_relay_mapping(sent.message_id, user.id)
@@ -1499,7 +1499,7 @@ async def mdb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current = get_database_channel()
     await reply_text_auto(
         message,
-        f"<b>Movie Database Channel</b>\\nChannel ID: <code>{current}</code>\\n\\nಈ Channel ID ಅನ್ನು bot codeನಲ್ಲಿ fixed ಆಗಿ ಇಟ್ಟಿದ್ದೇವೆ. ಮತ್ತೆ /mdb ಮೂಲಕ set ಮಾಡುವ ಅಗತ್ಯವಿಲ್ಲ. Botಗೆ ಆ Channelನಲ್ಲಿ Admin permission ಇರಬೇಕು.",
+        f"<b>Movie Database Channel</b>\nChannel ID: <code>{current}</code>\n\nಈ Channel ID ಅನ್ನು bot codeನಲ್ಲಿ fixed ಆಗಿ ಇಟ್ಟಿದ್ದೇವೆ. ಮತ್ತೆ /mdb ಮೂಲಕ set ಮಾಡುವ ಅಗತ್ಯವಿಲ್ಲ. Botಗೆ ಆ Channelನಲ್ಲಿ Admin permission ಇರಬೇಕು.",
         parse_mode="HTML",
     )
 
@@ -1691,7 +1691,7 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not handled:
             sent = await relay_private_message(message, context)
             if not sent:
-                await reply_text_auto(message, "ಹತ್ತಿರದ Movie / Web Series ಹೆಸರು ಸಿಗಲಿಲ್ಲ.\\nNo close matching titles found.")
+                await reply_text_auto(message, "ಹತ್ತಿರದ Movie / Web Series ಹೆಸರು ಸಿಗಲಿಲ್ಲ.\nNo close matching titles found.")
     except httpx.HTTPStatusError as exc:
         log.warning("TMDB request failed with HTTP %s", exc.response.status_code)
         await reply_text_auto(message, "TMDB search ಈಗ ಲಭ್ಯವಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ.")
@@ -1719,7 +1719,7 @@ async def group_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def group_suggestion_list_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Save multi-line title/year lists posted in groups into the suggestion database."""
     message = update.effective_message
-    if not message or not message.text or "\\n" not in message.text:
+    if not message or not message.text or "\n" not in message.text:
         return
     try:
         saved_count = save_suggestion_post(message)
@@ -1741,13 +1741,13 @@ async def group_suggestion_list_save(update: Update, context: ContextTypes.DEFAU
 
 async def health_check(reader, writer):
     try:
-        await reader.readuntil(b"\\r\\n\\r\\n")
+        await reader.readuntil(b"\\r\n\\r\n")
         body = b"Personal-clone Telegram bot is running"
         writer.write(
-            b"HTTP/1.1 200 OK\\r\\n"
-            b"Content-Type: text/plain; charset=utf-8\\r\\n"
-            + f"Content-Length: {len(body)}\\r\\n".encode()
-            + b"Connection: close\\r\\n\\r\\n"
+            b"HTTP/1.1 200 OK\\r\n"
+            b"Content-Type: text/plain; charset=utf-8\\r\n"
+            + f"Content-Length: {len(body)}\\r\n".encode()
+            + b"Connection: close\\r\n\\r\n"
             + body
         )
         await writer.drain()
