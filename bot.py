@@ -835,10 +835,32 @@ async def find_title(query):
     return found[0][2], found[0][3], found[0][0]
 
 
+def movie_search_queries(query):
+    """Build safe alternate queries by removing trailing language/category keywords."""
+    original = clean_search_title(query)
+    core = re.sub(
+        r"\s+(?:(?:kannada| ಕನ್ನಡ|hindi|telugu|tamil|malayalam|english|"
+        r"marathi|bengali|punjabi|gujarati|urdu)\s+)?"
+        r"(?:movie|film|cinema|web\s*series|series)\s*$",
+        "",
+        original,
+        flags=re.IGNORECASE,
+    ).strip()
+    queries = []
+    for value in (core, original):
+        value = re.sub(r"\s+", " ", value).strip()
+        if value and normalize_movie_key(value) not in {
+            normalize_movie_key(item) for item in queries
+        }:
+            queries.append(value)
+    return queries or [original]
+
+
 async def find_matching_titles(query):
     """Combine suggestions in provider order: TMDb, local MongoDB, then OMDb."""
     matches = {}
-    search_title = clean_search_title(query)
+    search_queries = movie_search_queries(query)
+    search_title = search_queries[0]
     requested_year_match = re.search(r"\b((?:19|20)\d{2})\b", query)
     requested_year = requested_year_match.group(1) if requested_year_match else None
     requested_key = normalize_movie_key(search_title)
@@ -897,16 +919,17 @@ async def find_matching_titles(query):
     # 1) TMDb first: search both movies and TV series.
     if TMDB_BEARER_TOKEN:
         for kind, endpoint in (("movie", "/search/movie"), ("tv", "/search/tv")):
-            try:
-                data = await tmdb_get(endpoint, {
-                    "query": search_title, "include_adult": "false", "page": 1,
-                })
-                for item in data.get("results", [])[:20]:
-                    name = item.get("title") if kind == "movie" else item.get("name")
-                    date = item.get("release_date") if kind == "movie" else item.get("first_air_date")
-                    add_match(name, date[:4] if date else "", item.get("popularity") or 0, source_rank=3)
-            except Exception as exc:
-                log.warning("TMDb suggestion search unavailable for %s (%s)", kind, type(exc).__name__)
+            for search_query in search_queries:
+                try:
+                    data = await tmdb_get(endpoint, {
+                        "query": search_query, "include_adult": "false", "page": 1,
+                    })
+                    for item in data.get("results", [])[:20]:
+                        name = item.get("title") if kind == "movie" else item.get("name")
+                        date = item.get("release_date") if kind == "movie" else item.get("first_air_date")
+                        add_match(name, date[:4] if date else "", item.get("popularity") or 0, source_rank=3)
+                except Exception as exc:
+                    log.warning("TMDb suggestion search unavailable for %s (%s)", kind, type(exc).__name__)
 
     # 2) MongoDB records: saved movie channel, suggestion channel, then indexed titles.
     try:
