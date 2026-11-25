@@ -207,8 +207,8 @@ def get_pm_log_channel():
         if row:
             return int(row[0])
         conn.execute(
-            "INSERT INTO settings(key, value) VALUES('pm_log_channel_id', ?)",
-            (str(PM_LOG_CHANNEL_DEFAULT_ID),),
+            "INSERT INTO settings(key, value) VALUES(?, ?)",
+            ("pm_log_channel_id", str(PM_LOG_CHANNEL_DEFAULT_ID)),
         )
     return PM_LOG_CHANNEL_DEFAULT_ID
 
