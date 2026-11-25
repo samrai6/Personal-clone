@@ -836,16 +836,27 @@ async def find_title(query):
 
 
 def movie_search_queries(query):
-    """Build safe alternate queries by removing trailing language/category keywords."""
+    """Remove language labels and conversational filler before searching the title."""
     original = clean_search_title(query)
-    core = re.sub(
-        r"\s+(?:(?:kannada| ಕನ್ನಡ|hindi|telugu|tamil|malayalam|english|"
-        r"marathi|bengali|punjabi|gujarati|urdu)\s+)?"
-        r"(?:movie|film|cinema|web\s*series|series)\s*$",
-        "",
-        original,
-        flags=re.IGNORECASE,
-    ).strip()
+    cleaned = original.casefold()
+
+    # These words describe language/type or are request filler, not part of the title.
+    removable_phrases = (
+        "send me", "send madi", "send maadi", "kalsi", "kalisi",
+        "kalsi kodi", "please send", "show me", "find me",
+        "kannada", "malayalam", "hindi", "telugu", "tamil", "english",
+        "marathi", "bengali", "punjabi", "gujarati", "urdu",
+        "movie", "movies", "film", "films", "cinema", "web series", "series",
+    )
+    for phrase in sorted(removable_phrases, key=len, reverse=True):
+        cleaned = re.sub(
+            rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])",
+            " ",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+    core = re.sub(r"\s+", " ", cleaned).strip(" -_.,:;")
     queries = []
     for value in (core, original):
         value = re.sub(r"\s+", " ", value).strip()
