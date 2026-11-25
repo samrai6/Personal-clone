@@ -49,7 +49,7 @@ OWNER_ID = 1315244338
 MOVIE_DATABASE_CHANNEL_ID = -1004402999657
 SUGGESTION_DATABASE_CHANNEL_ID = -1004319588685
 DELETE_CHANNEL_ID = -1004392593374
-PM_LOG_CHANNEL_ID = -1004324692421
+PM_LOG_CHANNEL_DEFAULT_ID = -1004324692421
 # TMDB Read Access Token from Ironman poster plugin.
 TMDB_BEARER_TOKEN = os.getenv("TMDB_BEARER_TOKEN", "").strip()
 MOVIE_BOT = "Samp_yu5bot"
@@ -198,6 +198,19 @@ def db_connect():
     conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     conn.execute("CREATE TABLE IF NOT EXISTS relay_map (source_message_id BIGINT PRIMARY KEY, user_id BIGINT NOT NULL)")
     return conn
+
+
+def get_pm_log_channel():
+    """Read the PM log channel from persistent database settings."""
+    with db_connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key='pm_log_channel_id'").fetchone()
+        if row:
+            return int(row[0])
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES('pm_log_channel_id', ?)",
+            (str(PM_LOG_CHANNEL_DEFAULT_ID),),
+        )
+    return PM_LOG_CHANNEL_DEFAULT_ID
 
 
 def get_source_channel():
@@ -1450,7 +1463,7 @@ async def log_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         if message.text:
             logged = await context.bot.send_message(
-                chat_id=PM_LOG_CHANNEL_ID,
+                chat_id=get_pm_log_channel(),
                 text=(header + user_chat)[:4000],
                 disable_web_page_preview=True,
             )
@@ -1474,7 +1487,7 @@ async def log_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def pm_log_channel_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send an owner's reply to a logged PM message back to its original user."""
     message = update.channel_post
-    if not message or message.chat_id != PM_LOG_CHANNEL_ID or not message.reply_to_message:
+    if not message or message.chat_id != get_pm_log_channel() or not message.reply_to_message:
         return
     if not message.from_user or message.from_user.id != OWNER_ID:
         return
