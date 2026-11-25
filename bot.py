@@ -847,6 +847,7 @@ def movie_search_queries(query):
         "kannada", "malayalam", "hindi", "telugu", "tamil", "english",
         "marathi", "bengali", "punjabi", "gujarati", "urdu",
         "movie", "movies", "film", "films", "cinema", "web series", "series",
+        "dub", "dubbed", "dubbing", "dual audio", "multi audio", "original audio",
     )
     for phrase in sorted(removable_phrases, key=len, reverse=True):
         cleaned = re.sub(
