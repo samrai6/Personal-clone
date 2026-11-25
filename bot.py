@@ -1975,22 +1975,6 @@ def main():
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
-if __name__ == "__main__":
-    main(), r' \\1', name).strip())}</code>"
-        for index, name in enumerate(matches, start=1)
-    )
-    await reply_text_auto(
-        message,
-        "<b>ನೀವು ಹುಡುಕುತ್ತಿರುವ Movie / Web Series ಇದರಲ್ಲಿ ಇರಬಹುದೇ?\n"
-        "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\n"
-        f"{suggestions}\n\n"
-        "ಇದರಲ್ಲಿ ಇದ್ದರೆ, ಹೆಸರಿನ ಮೇಲೆ ಕ್ಲಿಕ್ ಮಾಡಿ Copy ಮಾಡಿ ಕಳುಹಿಸಿ.",
-        parse_mode="HTML",
-        reply_to_message_id=message.message_id,
-    )
-    return True
-
-
 async def show_movie(message, query, group_check=False, confirmed=False):
     if group_check:
         await show_title_suggestions(message, query)
