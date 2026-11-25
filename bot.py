@@ -1225,25 +1225,33 @@ async def apply_tavily_ott_date(details, provider_lines):
             updated.append(line)
     return updated
 
+def format_suggestion_title(name):
+    """Show a trailing release year without parentheses, preserving title punctuation."""
+    match = re.search(r"\\s*\\(((?:19|20)\\d{2})\\)$", name)
+    if match:
+        return name[:match.start()] + " " + match.group(1)
+    return name
+
+
 async def show_title_suggestions(message, query, matches=None):
     if matches is None:
         matches = await find_matching_titles(query)
     if not matches:
         return False
-    suggestions = "\n".join(
-        f"{index}. <code>{html.escape(re.sub(r'\\s*\\(((?:19|20)\\d{2})\\)
+    suggestions = "\\n".join(
+        f"{index}. <code>{html.escape(format_suggestion_title(name))}</code>"
+        for index, name in enumerate(matches, start=1)
+    )
     await reply_text_auto(
         message,
-        "<b>ನೀವು ಹುಡುಕುತ್ತಿರುವ Movie / Web Series ಇದರಲ್ಲಿ ಇರಬಹುದೇ?\n"
-        "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\n"
-        f"{suggestions}\n\n"
+        "<b>ನೀವು ಹುಡುಕುತ್ತಿರುವ Movie / Web Series ಇದರಲ್ಲಿ ಇರಬಹುದೇ?\\n"
+        "ಹೊಂದಾಣಿಕೆಯ ಹೆಸರುಗಳು:</b>\\n"
+        f"{suggestions}\\n\\n"
         "ಇದರಲ್ಲಿ ಇದ್ದರೆ, ಹೆಸರಿನ ಮೇಲೆ ಕ್ಲಿಕ್ ಮಾಡಿ Copy ಮಾಡಿ ಕಳುಹಿಸಿ.",
         parse_mode="HTML",
         reply_to_message_id=message.message_id,
     )
     return True
-
-
 async def show_movie(message, query, group_check=False, confirmed=False):
     if group_check:
         await show_title_suggestions(message, query)
