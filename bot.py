@@ -1475,7 +1475,7 @@ async def log_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             save_relay_mapping(logged.message_id, user.id)
             copied = await context.bot.copy_message(
-                chat_id=PM_LOG_CHANNEL_ID,
+                chat_id=get_pm_log_channel(),
                 from_chat_id=message.chat_id,
                 message_id=message.message_id,
             )
@@ -1489,7 +1489,9 @@ async def pm_log_channel_reply(update: Update, context: ContextTypes.DEFAULT_TYP
     message = update.channel_post
     if not message or message.chat_id != get_pm_log_channel() or not message.reply_to_message:
         return
-    if not message.from_user or message.from_user.id != OWNER_ID:
+    # Channel posts sent "as the channel" may have no from_user.
+    # The channel ID is already restricted above; enforce OWNER_ID only when Telegram provides a sender.
+    if message.from_user and message.from_user.id != OWNER_ID:
         return
     user_id = get_relay_user(message.reply_to_message.message_id)
     if not user_id:
