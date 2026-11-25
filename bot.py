@@ -1962,7 +1962,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check), group=0)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_suggestion_list_save), group=1)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, source_channel_reply))
-    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, pm_log_channel_reply), group=0)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, pm_log_channel_reply), group=-1)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_database_channel_post), group=1)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, suggestion_database_channel_post), group=2)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_ott_update_channel_post), group=3)
