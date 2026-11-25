@@ -1668,25 +1668,40 @@ async def source_channel_reply(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def source_discussion_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle replies in linked discussion groups for both source and PM log channels."""
     message = update.effective_message
-    source_id = get_source_channel()
-    if not message or not source_id or not message.reply_to_message:
+    if not message or not message.reply_to_message:
         return
     if not message.from_user or message.from_user.id != OWNER_ID:
         return
+
     original = message.reply_to_message
     origin = original.forward_origin
     origin_chat = getattr(origin, "chat", None) if origin else None
-    origin_message_id = getattr(origin, "message_id", None) if origin_chat and origin_chat.id == source_id else None
-    if not origin_message_id:
+    origin_chat_id = getattr(origin_chat, "id", None)
+    origin_message_id = getattr(origin, "message_id", None)
+    allowed_channels = {get_source_channel(), get_pm_log_channel()}
+    allowed_channels.discard(None)
+
+    # A comment in a linked discussion group is a reply to the auto-forwarded
+    # channel post. Resolve that original channel post to its user mapping.
+    if origin_chat_id not in allowed_channels or not origin_message_id:
         return
     user_id = get_relay_user(origin_message_id)
     if not user_id:
+        log.warning(
+            "Discussion reply has no relay mapping: origin_channel=%s origin_message=%s",
+            origin_chat_id, origin_message_id,
+        )
         return
     try:
         await send_owner_reply_to_user(message, user_id, context)
+        log.info(
+            "Discussion reply delivered: channel=%s message=%s user_id=%s",
+            origin_chat_id, origin_message_id, user_id,
+        )
     except Exception as exc:
-        log.warning("Discussion reply delivery failed (%s)", type(exc).__name__)
+        log.exception("Discussion reply delivery failed (%s)", type(exc).__name__)
 
 
 async def private_non_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
