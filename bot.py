@@ -1470,7 +1470,7 @@ async def log_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             save_relay_mapping(logged.message_id, user.id)
         else:
             logged = await context.bot.send_message(
-                chat_id=PM_LOG_CHANNEL_ID,
+                chat_id=get_pm_log_channel(),
                 text=header + user_chat[:500],
             )
             save_relay_mapping(logged.message_id, user.id)
