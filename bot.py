@@ -49,6 +49,7 @@ OWNER_ID = 1315244338
 MOVIE_DATABASE_CHANNEL_ID = -1004402999657
 SUGGESTION_DATABASE_CHANNEL_ID = -1004319588685
 DELETE_CHANNEL_ID = -1004392593374
+PM_LOG_CHANNEL_ID = -1004324692421
 # TMDB Read Access Token from Ironman poster plugin.
 TMDB_BEARER_TOKEN = os.getenv("TMDB_BEARER_TOKEN", "").strip()
 MOVIE_BOT = "Samp_yu5bot"
@@ -1430,6 +1431,62 @@ async def accept_source_forward(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
+async def log_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Log every incoming private message and map it for owner replies from the log channel."""
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user or user.is_bot or message.chat.type != "private":
+        return
+
+    name = user.full_name or "Unknown"
+    username = f"@{user.username}" if user.username else "Not set"
+    user_chat = message.text or message.caption or "[Media / attachment]"
+    header = (
+        f"👤 User Name: {name}\n"
+        f"🔗 Username: {username}\n"
+        f"🆔 User ID: {user.id}\n"
+        "💬 User Chat:\n"
+    )
+    try:
+        if message.text:
+            logged = await context.bot.send_message(
+                chat_id=PM_LOG_CHANNEL_ID,
+                text=(header + user_chat)[:4000],
+                disable_web_page_preview=True,
+            )
+            save_relay_mapping(logged.message_id, user.id)
+        else:
+            logged = await context.bot.send_message(
+                chat_id=PM_LOG_CHANNEL_ID,
+                text=header + user_chat[:500],
+            )
+            save_relay_mapping(logged.message_id, user.id)
+            copied = await context.bot.copy_message(
+                chat_id=PM_LOG_CHANNEL_ID,
+                from_chat_id=message.chat_id,
+                message_id=message.message_id,
+            )
+            save_relay_mapping(copied.message_id, user.id)
+    except Exception as exc:
+        log.exception("Could not log private message to PM log channel (%s)", type(exc).__name__)
+
+
+async def pm_log_channel_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send an owner's reply to a logged PM message back to its original user."""
+    message = update.channel_post
+    if not message or message.chat_id != PM_LOG_CHANNEL_ID or not message.reply_to_message:
+        return
+    if not message.from_user or message.from_user.id != OWNER_ID:
+        return
+    user_id = get_relay_user(message.reply_to_message.message_id)
+    if not user_id:
+        return
+    try:
+        await send_owner_reply_to_user(message, user_id, context)
+    except Exception as exc:
+        log.warning("Could not deliver PM log-channel reply (%s)", type(exc).__name__)
+
+
 async def relay_private_message(message, context: ContextTypes.DEFAULT_TYPE):
     source_id = get_source_channel()
     if not source_id:
@@ -1860,6 +1917,7 @@ def main():
         raise SystemExit("Missing configuration: " + ", ".join(missing))
     app = ApplicationBuilder().token(TOKEN).post_init(startup_notify).build()
     # React to incoming PM and group messages without interrupting existing handlers.
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE, log_private_message), group=-3)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
     app.add_handler(CommandHandler("ai", ai_command))
@@ -1874,6 +1932,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check), group=0)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_suggestion_list_save), group=1)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, source_channel_reply))
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, pm_log_channel_reply), group=0)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_database_channel_post), group=1)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, suggestion_database_channel_post), group=2)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_ott_update_channel_post), group=3)
