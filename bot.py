@@ -227,20 +227,20 @@ def movie_name_script_reply(value):
     value = value or ""
     if re.search(r"[\u0C80-\u0CFF]", value):
         return (
-            "**ದಯವಿಟ್ಟು ಮೂವೀ ಹೆಸರನ್ನು ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಮಾತ್ರ ಟೈಪ್ ಮಾಡಿ ಕಳುಹಿಸಿ.**\n\n"
-            "**Example:**\n"
-            "**RRR (2022)**\n"
-            "**Preamada Oorali (2026)**\n"
-            "**KGF Chapter 2 (2022)**"
+            "<b>ದಯವಿಟ್ಟು ಮೂವೀ ಹೆಸರನ್ನು ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಮಾತ್ರ ಟೈಪ್ ಮಾಡಿ ಕಳುಹಿಸಿ.</b>\n\n"
+            "<b>Example:</b>\n"
+            "<b>RRR (2022)</b>\n"
+            "<b>Preamada Oorali (2026)</b>\n"
+            "<b>KGF Chapter 2 (2022)</b>"
         )
     for char in value:
         if char.isalpha() and "LATIN" not in unicodedata.name(char, ""):
             return (
-                "**Please type and send the movie name in English only.**\n\n"
-                "**Example:**\n"
-                "**RRR (2022)**\n"
-                "**Preamada Oorali (2026)**\n"
-                "**KGF Chapter 2 (2022)**"
+                "<b>Please type and send the movie name in English only.</b>\n\n"
+                "<b>Example:</b>\n"
+                "<b>RRR (2022)</b>\n"
+                "<b>Preamada Oorali (2026)</b>\n"
+                "<b>KGF Chapter 2 (2022)</b>"
             )
     return None
 
@@ -1682,7 +1682,7 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = message.text.strip()
     language_reply = movie_name_script_reply(query)
     if language_reply:
-        await reply_text_auto(message, language_reply, parse_mode="Markdown")
+        await reply_text_auto(message, language_reply, parse_mode="HTML")
         return
     if len(query) < 2 or len(query) > 100:
         return
