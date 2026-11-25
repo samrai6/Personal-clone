@@ -864,12 +864,45 @@ def movie_search_queries(query):
     corrected = re.sub(r"\boddesy\b", "odyssey", corrected, flags=re.IGNORECASE)
 
     queries = []
-    for value in (corrected, core, original):
+    def add_query(value):
         value = re.sub(r"\s+", " ", value).strip()
-        if value and normalize_movie_key(value) not in {
-            normalize_movie_key(item) for item in queries
-        }:
+        key = normalize_movie_key(value)
+        if value and key and key not in {normalize_movie_key(item) for item in queries}:
             queries.append(value)
+
+    add_query(corrected)
+    add_query(core)
+    add_query(original)
+
+    # Generate a small number of typo-tolerant variants for longer title words.
+    # TMDb searches these variants; title_similarity then ranks the real title.
+    words = corrected.split()
+    for index, word in sorted(
+        enumerate(words), key=lambda pair: len(pair[1]), reverse=True
+    ):
+        if len(word) < 6:
+            continue
+        for position in range(1, len(word) - 1):
+            variant = word[:position] + word[position + 1:]
+            if variant != word:
+                changed = list(words)
+                changed[index] = variant
+                add_query(" ".join(changed))
+                if len(queries) >= 7:
+                    return queries
+        # Adjacent transposition variants catch common typing slips.
+        for position in range(1, len(word) - 1):
+            if word[position] == word[position + 1]:
+                continue
+            variant = (
+                word[:position] + word[position + 1] + word[position]
+                + word[position + 2:]
+            )
+            changed = list(words)
+            changed[index] = variant
+            add_query(" ".join(changed))
+            if len(queries) >= 7:
+                return queries
     return queries or [original]
 
 
@@ -922,7 +955,7 @@ async def find_matching_titles(query):
             return
         ratio = title_similarity(search_title, name)
         exact_score = 1 if requested_key == key else 0
-        if ratio < 0.50 and not force_exact:
+        if ratio < 0.42 and not force_exact:
             return
         year = str(year or "")
         year_number = int(year) if re.fullmatch(r"\d{4}", year) else 0
