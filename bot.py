@@ -7,6 +7,7 @@ import os
 import re
 import random
 import sqlite3
+import unicodedata
 from pathlib import Path
 from difflib import SequenceMatcher
 
@@ -219,6 +220,29 @@ def set_database_channel(chat_id):
 
 def normalize_movie_key(value):
     return re.sub(r"[^a-z0-9]+", "", (value or "").casefold())
+
+
+def movie_name_script_reply(value):
+    """Return a language-specific prompt when a movie query uses a non-Latin script."""
+    value = value or ""
+    if re.search(r"[\\u0C80-\\u0CFF]", value):
+        return (
+            "**ದಯವಿಟ್ಟು ಮೂವೀ ಹೆಸರನ್ನು ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿ ಮಾತ್ರ ಟೈಪ್ ಮಾಡಿ ಕಳುಹಿಸಿ.**\\n\\n"
+            "**Example:**\\n"
+            "**RRR (2022)**\\n"
+            "**Preamada Oorali (2026)**\\n"
+            "**KGF Chapter 2 (2022)**"
+        )
+    for char in value:
+        if char.isalpha() and "LATIN" not in unicodedata.name(char, ""):
+            return (
+                "**Please type and send the movie name in English only.**\\n\\n"
+                "**Example:**\\n"
+                "**RRR (2022)**\\n"
+                "**Preamada Oorali (2026)**\\n"
+                "**KGF Chapter 2 (2022)**"
+            )
+    return None
 
 
 def extract_ott_info(caption):
@@ -1656,6 +1680,10 @@ async def private_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message or not message.text:
         return
     query = message.text.strip()
+    language_reply = movie_name_script_reply(query)
+    if language_reply:
+        await reply_text_auto(message, language_reply, parse_mode="Markdown")
+        return
     if len(query) < 2 or len(query) > 100:
         return
     try:
