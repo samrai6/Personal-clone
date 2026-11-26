@@ -35,14 +35,41 @@ async def react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message:
         return
     try:
+        # Respect the emoji list configured by the channel/group owner.
+        chat = await context.bot.get_chat(message.chat_id)
+        allowed_reactions = chat.available_reactions
+        if allowed_reactions is None:
+            choices = REACTIONS
+        else:
+            choices = [
+                reaction.emoji
+                for reaction in allowed_reactions
+                if isinstance(reaction, ReactionTypeEmoji) and reaction.emoji in REACTIONS
+            ]
+
+        if not choices:
+            log.warning(
+                "No supported standard emoji reactions are allowed: chat_id=%s message_id=%s",
+                message.chat_id, message.message_id,
+            )
+            return
+
+        selected_reaction = random.choice(choices)
         await context.bot.set_message_reaction(
             chat_id=message.chat_id,
             message_id=message.message_id,
-            reaction=[ReactionTypeEmoji(random.choice(REACTIONS))],
+            reaction=[ReactionTypeEmoji(selected_reaction)],
             is_big=True,
         )
-    except Exception as exc:
-        log.warning("Message reaction failed: chat_id=%s message_id=%s error=%s", message.chat_id, message.message_id, exc)
+        log.info(
+            "Message reaction set: chat_id=%s message_id=%s reaction=%s",
+            message.chat_id, message.message_id, selected_reaction,
+        )
+    except Exception:
+        log.exception(
+            "Message reaction failed: chat_id=%s message_id=%s",
+            message.chat_id, message.message_id,
+        )
 
 TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = 1315244338
