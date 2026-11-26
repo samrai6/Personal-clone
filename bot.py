@@ -31,28 +31,45 @@ REACTIONS = [
 
 
 async def react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """React immediately to every incoming message in PMs, groups and channels."""
     message = update.effective_message
     if not message:
         return
-    try:
-        # Respect the emoji list configured by the channel/group owner.
-        chat = await context.bot.get_chat(message.chat_id)
-        allowed_reactions = chat.available_reactions
-        if allowed_reactions is None:
-            choices = REACTIONS
-        else:
-            allowed_standard = [
-                reaction.emoji
-                for reaction in allowed_reactions
-                if isinstance(reaction, ReactionTypeEmoji)
-            ]
-            choices = [emoji for emoji in REACTIONS if emoji in allowed_standard]
-            if not choices:
-                choices = allowed_standard
 
+    selected_reaction = random.choice(REACTIONS)
+    try:
+        # Fast path: send the reaction immediately without an extra get_chat request.
+        await context.bot.set_message_reaction(
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            reaction=[ReactionTypeEmoji(selected_reaction)],
+            is_big=True,
+        )
+        log.info(
+            "Message reaction set: chat_id=%s message_id=%s reaction=%s",
+            message.chat_id, message.message_id, selected_reaction,
+        )
+        return
+    except Exception:
+        # If this chat restricts reactions, discover its allowed emoji and retry once.
+        log.warning(
+            "Initial reaction failed; checking chat-allowed reactions: chat_id=%s message_id=%s",
+            message.chat_id, message.message_id,
+        )
+
+    try:
+        chat = await context.bot.get_chat(message.chat_id)
+        allowed = chat.available_reactions
+        if allowed is None:
+            raise RuntimeError("Chat does not expose a restricted reaction list")
+
+        choices = [
+            item.emoji for item in allowed
+            if isinstance(item, ReactionTypeEmoji)
+        ]
         if not choices:
             log.warning(
-                "No supported standard emoji reactions are allowed: chat_id=%s message_id=%s",
+                "No standard emoji reactions are allowed: chat_id=%s message_id=%s",
                 message.chat_id, message.message_id,
             )
             return
@@ -65,7 +82,7 @@ async def react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_big=True,
         )
         log.info(
-            "Message reaction set: chat_id=%s message_id=%s reaction=%s",
+            "Fallback reaction set: chat_id=%s message_id=%s reaction=%s",
             message.chat_id, message.message_id, selected_reaction,
         )
     except Exception:
@@ -2709,10 +2726,12 @@ def main():
     if missing:
         raise SystemExit("Missing configuration: " + ", ".join(missing))
     app = ApplicationBuilder().token(TOKEN).post_init(startup_notify).build()
-    # React to incoming PM and group messages without interrupting existing handlers.
+    # React to every new PM, group/supergroup message and channel post.
+    # Keep these in a separate early handler group so later bot handlers still run.
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE, log_private_message), group=-3)
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE, react_to_message), group=-2)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS, react_to_message), group=-2)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, react_to_message), group=-2)
     app.add_handler(CommandHandler("ai", ai_command))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("fs", fs_command))
