@@ -1987,6 +1987,8 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE, log_private_message), group=-3)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
+    # Match Naruto09: react to every new channel post.
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, react_to_message), group=-2)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, react_to_message), group=-2)
     app.add_handler(CommandHandler("ai", ai_command))
     app.add_handler(CommandHandler("start", start))
