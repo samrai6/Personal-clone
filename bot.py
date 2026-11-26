@@ -1908,18 +1908,19 @@ async def group_suggestion_list_save(update: Update, context: ContextTypes.DEFAU
 
 async def health_check(reader, writer):
     try:
-        await reader.readuntil(b"\\r\n\\r\n")
+        await reader.readuntil(b"\r\n\r\n")
         body = b"Personal-clone Telegram bot is running"
-        writer.write(
-            b"HTTP/1.1 200 OK\\r\n"
-            b"Content-Type: text/plain; charset=utf-8\\r\n"
-            + f"Content-Length: {len(body)}\\r\n".encode()
-            + b"Connection: close\\r\n\\r\n"
+        response = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/plain; charset=utf-8\r\n"
+            + f"Content-Length: {len(body)}\r\n".encode()
+            + b"Connection: close\r\n\r\n"
             + body
         )
+        writer.write(response)
         await writer.drain()
     except Exception:
-        pass
+        log.exception("Health check failed")
     finally:
         writer.close()
         await writer.wait_closed()
