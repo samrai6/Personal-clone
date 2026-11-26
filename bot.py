@@ -42,7 +42,7 @@ async def react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_big=True,
         )
     except Exception as exc:
-        log.debug("Message reaction skipped (%s)", type(exc).__name__)
+        log.warning("Message reaction failed: chat_id=%s message_id=%s error=%s", message.chat_id, message.message_id, exc)
 
 TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = 1315244338
@@ -1957,6 +1957,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE, log_private_message), group=-3)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, react_to_message), group=-2)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, react_to_message), group=-2)
     app.add_handler(CommandHandler("ai", ai_command))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("fs", fs_command))
