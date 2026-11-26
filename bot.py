@@ -41,11 +41,14 @@ async def react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if allowed_reactions is None:
             choices = REACTIONS
         else:
-            choices = [
+            allowed_standard = [
                 reaction.emoji
                 for reaction in allowed_reactions
-                if isinstance(reaction, ReactionTypeEmoji) and reaction.emoji in REACTIONS
+                if isinstance(reaction, ReactionTypeEmoji)
             ]
+            choices = [emoji for emoji in REACTIONS if emoji in allowed_standard]
+            if not choices:
+                choices = allowed_standard
 
         if not choices:
             log.warning(
