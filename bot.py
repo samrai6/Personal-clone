@@ -1978,3 +1978,32 @@ def main():
     if not MONGODB_URI:
         missing.append("MONGODB_URI")
     if missing:
+        raise SystemExit("Missing configuration: " + ", ".join(missing))
+    app = ApplicationBuilder().token(TOKEN).post_init(startup_notify).build()
+    # React to every new PM, group/supergroup message and channel post.
+    # Keep these in a separate early handler group so later bot handlers still run.
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE, log_private_message), group=-3)
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE, react_to_message), group=-2)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS, react_to_message), group=-2)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, react_to_message), group=-2)
+    app.add_handler(CommandHandler("ai", ai_command))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("fs", fs_command))
+    app.add_handler(CommandHandler("mdb", mdb_command))
+    app.add_handler(CallbackQueryHandler(fs_callback, pattern=r"^fs:"))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.FORWARDED, accept_source_forward), group=-1)
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, private_reply))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.TEXT & ~filters.COMMAND, private_non_text))
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.REPLY, source_discussion_reply), group=-1)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_check), group=0)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_suggestion_list_save), group=1)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, source_channel_reply))
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, pm_log_channel_reply), group=-1)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_database_channel_post), group=1)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, suggestion_database_channel_post), group=2)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, movie_ott_update_channel_post), group=3)
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
